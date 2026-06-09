@@ -1,0 +1,76 @@
+import Foundation
+import CoreLocation
+
+/// A canvassing lead: one door, one homeowner conversation.
+struct Lead: Identifiable, Codable, Hashable {
+    enum Status: String, Codable, CaseIterable, Identifiable {
+        case newLead = "New"
+        case notHome = "Not Home"
+        case interested = "Interested"
+        case appointment = "Appointment"
+        case inspected = "Inspected"
+        case signed = "Signed"
+        case notInterested = "Not Interested"
+
+        var id: String { rawValue }
+
+        var symbolName: String {
+            switch self {
+            case .newLead: return "mappin.circle.fill"
+            case .notHome: return "door.left.hand.closed"
+            case .interested: return "hand.thumbsup.fill"
+            case .appointment: return "calendar.badge.clock"
+            case .inspected: return "checkmark.seal.fill"
+            case .signed: return "signature"
+            case .notInterested: return "hand.thumbsdown.fill"
+            }
+        }
+    }
+
+    var id: UUID
+    var createdAt: Date
+    var updatedAt: Date
+    var status: Status
+    var address: String
+    var latitude: Double
+    var longitude: Double
+    var homeownerName: String
+    var phone: String
+    var notes: String
+    /// Snapshot of the best nearby storm evidence at the time the lead was saved.
+    var stormSummary: String
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var shortAddress: String {
+        address.components(separatedBy: ",").first ?? address
+    }
+
+    init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        status: Status = .newLead,
+        address: String,
+        latitude: Double,
+        longitude: Double,
+        homeownerName: String = "",
+        phone: String = "",
+        notes: String = "",
+        stormSummary: String = ""
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.status = status
+        self.address = address
+        self.latitude = latitude
+        self.longitude = longitude
+        self.homeownerName = homeownerName
+        self.phone = phone
+        self.notes = notes
+        self.stormSummary = stormSummary
+    }
+}
