@@ -117,7 +117,7 @@ struct PropertySheetView: View {
                     ContentUnavailableView(
                         "No reports in range",
                         systemImage: "cloud.sun",
-                        description: Text("No SPC severe weather reports within \(Int(radiusMiles)) mi in the last \(lookbackDays) days. Widen the radius in Settings.")
+                        description: Text("No SPC severe weather reports within \(Int(radiusMiles)) mi in the last \(AppSettings.lookbackLabel(days: lookbackDays)). Widen the radius or lookback in Settings.")
                     )
                 } else {
                     ForEach(nearbyReports.prefix(12)) { item in
@@ -126,7 +126,7 @@ struct PropertySheetView: View {
                 }
             }
         } header: {
-            Text("Storm Evidence — \(Int(radiusMiles)) mi / \(lookbackDays) days")
+            Text("Storm Evidence — \(Int(radiusMiles)) mi / \(AppSettings.lookbackLabel(days: lookbackDays))")
         } footer: {
             Text("Source: NOAA Storm Prediction Center reports & National Weather Service alerts. Preliminary, unverified data.")
         }
@@ -198,7 +198,7 @@ struct PropertySheetView: View {
     private var propertyContext: String {
         var lines = ["Address: \(addressLine)"]
         lines.append("Coordinates: \(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude))")
-        lines.append("Storm data (NOAA SPC, last \(lookbackDays) days, \(Int(radiusMiles)) mi radius): \(stormSummary)")
+        lines.append("Storm data (NOAA SPC, last \(AppSettings.lookbackLabel(days: lookbackDays)), \(Int(radiusMiles)) mi radius): \(stormSummary)")
         if !alerts.isEmpty {
             lines.append("Active NWS alerts: " + alerts.map(\.event).joined(separator: "; "))
         }

@@ -116,7 +116,7 @@ actor StormDataService {
     /// snapshots and as context for the AI claim assistant.
     static func summary(of nearby: [NearbyStormReport], lookbackDays: Int) -> String {
         guard !nearby.isEmpty else {
-            return "No SPC severe weather reports within range in the last \(lookbackDays) days."
+            return "No SPC severe weather reports within range in the last \(AppSettings.lookbackLabel(days: lookbackDays))."
         }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -129,7 +129,7 @@ actor StormDataService {
             .map { "\($0.value.count) \($0.key.label.lowercased())" }
             .sorted()
             .joined(separator: ", ")
-        return "Last \(lookbackDays) days: \(nearby.count) SPC reports in range (\(counts)). Closest/most recent: "
+        return "Last \(AppSettings.lookbackLabel(days: lookbackDays)): \(nearby.count) SPC reports in range (\(counts)). Closest/most recent: "
             + top.joined(separator: "; ") + "."
     }
 
@@ -142,7 +142,7 @@ actor StormDataService {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
         let todayUTC = calendar.startOfDay(for: now)
-        let clamped = max(1, min(lookbackDays, 120))
+        let clamped = max(1, min(lookbackDays, AppSettings.maxLookbackDays))
         return (0..<clamped).compactMap { offset in
             calendar.date(byAdding: .day, value: -offset, to: todayUTC)
         }

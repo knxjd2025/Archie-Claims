@@ -67,10 +67,12 @@ final class SPCReportParserTests: XCTestCase {
     func testDistanceFilter() {
         let reports = SPCReportParser.parse(csv: fixtureCSV, convectiveDayUTC: day)
         // Property in Moore, OK — about a mile from the "4 W MOORE" report.
+        // NORMAN is ~10.4 mi out, so a 12 mi filter keeps it while still
+        // excluding PERKINS (~46 mi).
         let property = CLLocationCoordinate2D(latitude: 35.3395, longitude: -97.55)
         let nearby = reports
             .map { NearbyStormReport(report: $0, distanceMiles: $0.distanceMiles(from: property)) }
-            .filter { $0.distanceMiles <= 10 }
+            .filter { $0.distanceMiles <= 12 }
         XCTAssertTrue(nearby.contains { $0.report.location == "4 W MOORE" })
         XCTAssertTrue(nearby.contains { $0.report.location == "NORMAN" })
         XCTAssertFalse(nearby.contains { $0.report.location == "2 N PERKINS" })

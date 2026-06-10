@@ -7,7 +7,7 @@
 | **Canvass** | Live map (standard/satellite). Tap a rooftop → reverse-geocoded address + storm evidence + contact lookups. Saved leads show as status-colored pins. |
 | **Archie AI** | Claim assistant chat: door scripts, ACV/RCV explanations, photo checklists, follow-up texts. Attach a property's storm data with one tap ("Ask Archie"). |
 | **Leads** | Every door you've knocked: status (Not Home → Signed), homeowner info, notes, call & share. Stored 100% on-device. |
-| **Settings** | Your Anthropic API key (Keychain), storm search radius & lookback, data attribution. |
+| **Settings** | Archie account sign-in (Keychain), storm search radius & lookback, data attribution. |
 
 ## Data sources (all free, no API keys)
 
@@ -19,9 +19,9 @@
 
 ## AI assistant
 
-Archie runs on the Anthropic Messages API with model `claude-opus-4-8` (streaming, adaptive thinking). The app is **bring-your-own-key**: each user pastes their own Anthropic API key in Settings, which is stored in the iOS Keychain and sent only to `api.anthropic.com`. Teams that run a backend proxy can set a custom base URL under Settings → AI Assistant → Advanced. Everything else in the app works without a key.
+Archie chat runs on the **main Archie CRM backend** at [app.archie.now](https://app.archie.now/) (Vercel proxies `/api/*` to the Render service `roofy-backend`) — the same accounts as the web app. Sign in **or create a free account** right in the app (Settings → AI Assistant, or the prompt on the Archie AI tab); the session JWT and credentials live in the iOS Keychain, auth uses `Authorization: Bearer` against `POST /api/ai-assistant` (`action: "chat"`), and the server supplies the roofing-expert system prompt plus your company profile from the CRM. Everything else in the app works without signing in.
 
-Get a key at [console.anthropic.com](https://console.anthropic.com/).
+A legacy **bring-your-own-key** mode (direct Anthropic Messages API, `claude-opus-4-8`, streaming) is still available under Settings → AI Assistant → Advanced → AI backend.
 
 ## Build & run
 

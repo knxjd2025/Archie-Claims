@@ -26,7 +26,7 @@ struct OnboardingView: View {
                 OnboardPage(
                     symbol: "sparkles",
                     title: "Archie, Your AI Sidekick",
-                    text: "Door scripts, damage photo checklists, claim explanations, follow-up texts — powered by Claude Opus 4.8. Add your Anthropic API key in Settings to turn it on (optional)."
+                    text: "Door scripts, damage photo checklists, claim explanations, follow-up texts — powered by Archie. Sign in or create a free account (same login as app.archie.now) to turn it on."
                 )
                 .tag(2)
             }

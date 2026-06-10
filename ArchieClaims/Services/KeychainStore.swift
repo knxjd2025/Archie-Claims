@@ -1,10 +1,14 @@
 import Foundation
 import Security
 
-/// Minimal Keychain wrapper for storing the user's Anthropic API key on-device.
+/// Minimal Keychain wrapper for on-device secrets: the Archie account session
+/// (JWT + credentials for silent refresh) and the optional legacy Anthropic key.
 enum KeychainStore {
     private static let service = "com.archieclaims.apikeys"
     static let anthropicKeyAccount = "anthropic-api-key"
+    static let archieTokenAccount = "archie-backend-token"
+    static let archieEmailAccount = "archie-backend-email"
+    static let archiePasswordAccount = "archie-backend-password"
 
     @discardableResult
     static func save(_ value: String, account: String = anthropicKeyAccount) -> Bool {

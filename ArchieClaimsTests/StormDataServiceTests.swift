@@ -22,7 +22,7 @@ final class StormDataServiceTests: XCTestCase {
 
     func testLookbackClamping() {
         let tooMany = StormDataService.recentConvectiveDays(lookbackDays: 9999)
-        XCTAssertEqual(tooMany.count, 120)
+        XCTAssertEqual(tooMany.count, 730)
         let tooFew = StormDataService.recentConvectiveDays(lookbackDays: 0)
         XCTAssertEqual(tooFew.count, 1)
     }

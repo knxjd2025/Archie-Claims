@@ -1,18 +1,23 @@
 import SwiftUI
 
-/// "Archie" — the AI roofing claim assistant, powered by Claude Opus 4.8 via
-/// the Anthropic Messages API (streaming).
+/// "Archie" — the AI roofing claim assistant. By default it talks to the main
+/// Archie CRM backend (sign in with your Archie account); a legacy
+/// direct-Anthropic mode with a user-supplied key remains under Settings →
+/// Advanced.
 struct AssistantView: View {
     @EnvironmentObject private var appState: AppState
 
     @AppStorage(AppSettings.modelOverrideKey) private var modelOverride = ""
     @AppStorage(AppSettings.proxyBaseURLKey) private var proxyBaseURL = ""
+    @AppStorage(AppSettings.assistantModeKey) private var assistantModeRaw = ""
+    @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
     @State private var messages: [ChatMessage] = []
     @State private var draft = ""
     @State private var isStreaming = false
     @State private var streamTask: Task<Void, Never>?
     @State private var errorText: String?
+    @State private var showAuthSheet = false
     @FocusState private var composerFocused: Bool
 
     private let quickPrompts = [
@@ -59,6 +64,11 @@ struct AssistantView: View {
             }
             .navigationTitle("Archie AI")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showAuthSheet) {
+                ArchieAccountSheet { _ in
+                    errorText = nil
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -89,6 +99,20 @@ struct AssistantView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal)
+
+            if AppSettings.assistantMode(from: assistantModeRaw) == .archie,
+               ArchieBackendService.signedInEmail == nil {
+                Button {
+                    showAuthSheet = true
+                } label: {
+                    Label("Sign in or create your free Archie account", systemImage: "person.crop.circle.badge.checkmark")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal)
+            }
 
             ForEach(quickPrompts, id: \.self) { prompt in
                 Button {
@@ -169,9 +193,20 @@ struct AssistantView: View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        guard let apiKey = KeychainStore.read(), !apiKey.isEmpty else {
-            errorText = "Add your Anthropic API key in Settings → AI Assistant to use Archie."
-            return
+        let mode = AppSettings.assistantMode(from: assistantModeRaw)
+        var legacyAPIKey = ""
+        switch mode {
+        case .archie:
+            guard ArchieBackendService.signedInEmail != nil else {
+                showAuthSheet = true
+                return
+            }
+        case .anthropic:
+            guard let apiKey = KeychainStore.read(), !apiKey.isEmpty else {
+                errorText = "Add your Anthropic API key in Settings → AI Assistant to use Archie."
+                return
+            }
+            legacyAPIKey = apiKey
         }
 
         errorText = nil
@@ -193,15 +228,23 @@ struct AssistantView: View {
         messages.append(assistantMessage)
         isStreaming = true
 
-        let service = ClaudeService(
-            apiKey: apiKey,
-            baseURL: AppSettings.baseURL(from: proxyBaseURL),
-            model: AppSettings.model(from: modelOverride)
-        )
+        let stream: AsyncThrowingStream<String, Error>
+        switch mode {
+        case .archie:
+            let service = ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
+            stream = service.streamReply(history: history)
+        case .anthropic:
+            let service = ClaudeService(
+                apiKey: legacyAPIKey,
+                baseURL: AppSettings.baseURL(from: proxyBaseURL),
+                model: AppSettings.model(from: modelOverride)
+            )
+            stream = service.streamReply(history: history)
+        }
 
         streamTask = Task {
             do {
-                for try await delta in service.streamReply(history: history) {
+                for try await delta in stream {
                     appendToLastAssistantMessage(delta)
                 }
             } catch {
