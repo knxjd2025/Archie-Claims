@@ -15,11 +15,13 @@ struct PropertySheetView: View {
     @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
     @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
-    // Paid owner report ($0.99).
+    // Paid owner report (1 data credit, Tracerfy).
     @State private var ownerReport: ArchieBackendService.OwnerReport?
     @State private var loadingOwner = false
     @State private var ownerMessage: String?
     @State private var confirmOwnerPurchase = false
+    @State private var creditInfo: ArchieBackendService.CreditInfo?
+    @State private var showCreditStore = false
 
     @State private var geocode: GeocodingService.Result?
     @State private var geocodeFailed = false
@@ -76,11 +78,15 @@ struct PropertySheetView: View {
                 async let geo: Void = loadGeocode()
                 async let storms: Void = loadStorms()
                 async let prop: Void = loadProperty()
-                _ = await (geo, storms, prop)
+                async let credits: Void = loadCredits()
+                _ = await (geo, storms, prop, credits)
             }
             .sheet(item: $safariURL) { item in
                 SafariView(url: item.url)
                     .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showCreditStore) {
+                CreditStoreView(info: creditInfo)
             }
         }
     }
@@ -238,26 +244,7 @@ struct PropertySheetView: View {
     @ViewBuilder
     private var ownerReportRows: some View {
         if let report = ownerReport {
-            VStack(alignment: .leading, spacing: 4) {
-                Label("Owner report", systemImage: "checkmark.seal.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.green)
-                if let name = report.name { ownerLine("Owner", name) }
-                if let phone = report.phone { ownerLine("Phone", phone) }
-                if let email = report.email { ownerLine("Email", email) }
-                if let mailing = report.mailingAddress { ownerLine("Mailing", mailing) }
-                if let occ = report.ownerOccupied {
-                    ownerLine("Occupancy", occ ? "Owner-occupied" : "Absentee owner")
-                }
-                Button {
-                    fillContactFromOwner(report)
-                } label: {
-                    Label("Use this info", systemImage: "arrow.down.doc")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.borderless)
-                .padding(.top, 2)
-            }
+            ownerResult(report)
         } else if loadingOwner {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
@@ -267,19 +254,34 @@ struct PropertySheetView: View {
             Button {
                 confirmOwnerPurchase = true
             } label: {
-                Label("Get Owner Report — $0.99", systemImage: "person.text.rectangle")
-                    .font(.subheadline.weight(.medium))
+                HStack {
+                    Label("Get Owner Report", systemImage: "person.text.rectangle")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text("1 credit").font(.caption).foregroundStyle(.secondary)
+                }
             }
             .confirmationDialog(
-                "Pull verified owner info (name, mailing address, and contact where available) and charge $0.99 to your Archie account?",
+                creditInfo.map { "Pull verified owner info (name, phones, emails, mailing) for this property? Uses 1 of your \($0.balance) data credits." }
+                    ?? "Pull verified owner info for this property? Uses 1 data credit.",
                 isPresented: $confirmOwnerPurchase,
                 titleVisibility: .visible
             ) {
-                Button("Get Owner Report — $0.99") { runOwnerReport() }
+                Button("Use 1 credit") { runOwnerReport() }
                 Button("Cancel", role: .cancel) {}
             }
+            if let info = creditInfo {
+                Button {
+                    showCreditStore = true
+                } label: {
+                    Text("\(info.balance) data credit\(info.balance == 1 ? "" : "s") left · Buy more")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
         } else {
-            Label("Sign in to Archie to use paid owner lookup", systemImage: "person.crop.circle.badge.questionmark")
+            Label("Sign in to Archie to use owner lookup", systemImage: "person.crop.circle.badge.questionmark")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -290,6 +292,53 @@ struct PropertySheetView: View {
         }
     }
 
+    @ViewBuilder
+    private func ownerResult(_ report: ArchieBackendService.OwnerReport) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Label("Owner report", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                Spacer()
+                if let n = report.remainingCredits {
+                    Text("\(n) credit\(n == 1 ? "" : "s") left").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if let name = report.name { ownerLine("Owner", name) }
+            ForEach(report.phones) { phone in
+                HStack(spacing: 6) {
+                    Text("Phone").font(.caption).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
+                    Text(phone.number).font(.caption).textSelection(.enabled)
+                    if let t = phone.type { Text(t).font(.caption2).foregroundStyle(.tertiary) }
+                    if phone.dnc {
+                        Text("DNC").font(.caption2.bold()).foregroundStyle(.red)
+                            .padding(.horizontal, 4).background(Color.red.opacity(0.12), in: Capsule())
+                    }
+                }
+            }
+            ForEach(report.emails, id: \.self) { ownerLine("Email", $0) }
+            if let mailing = report.mailingAddress { ownerLine("Mailing", mailing) }
+            if let occ = report.ownerOccupied { ownerLine("Occupancy", occ ? "Owner-occupied" : "Absentee owner") }
+            if let roof = report.roofMaterial { ownerLine("Roof", roof) }
+            if let yr = report.yearBuilt { ownerLine("Built", String(yr)) }
+            if let score = report.roofPropensityScore {
+                ownerLine("Roof score", "\(score)\(report.roofPropensityCategory.map { " · \($0)" } ?? "")")
+            }
+            if report.litigator {
+                Label("Known TCPA litigator — do not cold-call", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2).foregroundStyle(.red)
+            }
+            Button {
+                fillContactFromOwner(report)
+            } label: {
+                Label("Use this info", systemImage: "arrow.down.doc")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+            .padding(.top, 2)
+        }
+    }
+
     private func ownerLine(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
@@ -297,17 +346,29 @@ struct PropertySheetView: View {
         }
     }
 
+    private var archieService: ArchieBackendService {
+        ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
+    }
+
+    private func loadCredits() async {
+        guard ArchieBackendService.signedInEmail != nil else { return }
+        creditInfo = try? await archieService.creditInfo()
+    }
+
     private func runOwnerReport() {
         loadingOwner = true
         ownerMessage = nil
-        let service = ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
         Task {
             do {
-                ownerReport = try await service.ownerReport(
-                    latitude: coordinate.latitude,
-                    longitude: coordinate.longitude,
-                    address: addressLine
+                ownerReport = try await archieService.ownerReport(
+                    address: addressLine,
+                    city: geocode?.city ?? "",
+                    state: geocode?.state ?? "",
+                    zip: geocode?.postalCode ?? ""
                 )
+            } catch ArchieBackendService.OwnerLookupError.insufficientCredits {
+                creditInfo = try? await archieService.creditInfo()
+                showCreditStore = true
             } catch {
                 ownerMessage = error.localizedDescription
             }
@@ -318,8 +379,8 @@ struct PropertySheetView: View {
     /// Pre-fills the editable contact fields from a paid report (rep can edit).
     private func fillContactFromOwner(_ report: ArchieBackendService.OwnerReport) {
         if let name = report.name, homeownerName.isEmpty { homeownerName = name }
-        if let phone = report.phone, self.phone.isEmpty { self.phone = phone }
-        if let email = report.email, self.email.isEmpty { self.email = email }
+        if let phone = report.phones.first?.number, self.phone.isEmpty { self.phone = phone }
+        if let firstEmail = report.emails.first, self.email.isEmpty { self.email = firstEmail }
     }
 
     /// The five outcomes a canvasser logs at the door, in workflow order.

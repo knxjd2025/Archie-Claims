@@ -79,58 +79,131 @@ extension ArchieBackendService {
         }
     }
 
-    // MARK: - Paid owner report
+    // MARK: - Paid owner report (Tracerfy) + data credits
+
+    struct OwnerPhone: Identifiable {
+        var id: String { number }
+        let number: String
+        let type: String?
+        let dnc: Bool
+        let carrier: String?
+    }
 
     struct OwnerReport {
         let name: String?
-        let phone: String?
-        let email: String?
+        let phones: [OwnerPhone]
+        let emails: [String]
         let mailingAddress: String?
+        let litigator: Bool
         let ownerOccupied: Bool?
-        let cost: Double
+        let propertyType: String?
+        let yearBuilt: Int?
+        let roofMaterial: String?
+        let estimatedValue: Int?
+        let roofPropensityScore: Int?
+        let roofPropensityCategory: String?
+        let remainingCredits: Int?
+    }
+
+    struct CreditPackage: Identifiable {
+        let id: String
+        let credits: Int
+        let usd: Double
+    }
+
+    struct CreditInfo {
+        var balance: Int
+        var plan: String?
+        var costPerReport: Int
+        var packages: [CreditPackage]
+        var subscriptionMonthly: Double?
+        var subscriptionAnnual: Double?
+        var monthlyCredits: Int?
+        var paygPerCredit: Double?
     }
 
     enum OwnerLookupError: LocalizedError {
         case notConfigured
         case noOwnerFound
+        case insufficientCredits
         case message(String)
 
         var errorDescription: String? {
             switch self {
             case .notConfigured:
-                return "Paid owner lookup isn't set up yet. An admin needs to add a data provider in the Archie backend."
+                return "Owner lookup isn't set up yet. An admin needs to add the Tracerfy API token in the Archie backend."
             case .noOwnerFound:
                 return "No owner record was found for this property."
+            case .insufficientCredits:
+                return "You're out of data credits."
             case .message(let m):
                 return m
             }
         }
     }
 
-    /// `POST /api/property/owner-report` — paid ($0.99) owner identity lookup.
-    func ownerReport(latitude: Double, longitude: Double, address: String) async throws -> OwnerReport {
+    /// `GET /api/property/credits` — balance + plan + purchase catalog.
+    func creditInfo() async throws -> CreditInfo {
+        let result = try await authorizedJSON(path: "api/property/credits")
+        guard let dict = result as? [String: Any] else { throw BackendError.malformedResponse }
+        let catalog = dict["catalog"] as? [String: Any] ?? [:]
+        let sub = catalog["subscription"] as? [String: Any] ?? [:]
+        let packs = (catalog["packages"] as? [[String: Any]] ?? []).compactMap { p -> CreditPackage? in
+            guard let id = p["id"] as? String, let credits = p["credits"] as? Int else { return nil }
+            return CreditPackage(id: id, credits: credits, usd: (p["usd"] as? NSNumber)?.doubleValue ?? 0)
+        }
+        return CreditInfo(
+            balance: dict["balance"] as? Int ?? 0,
+            plan: dict["plan"] as? String,
+            costPerReport: dict["cost_per_report"] as? Int ?? 1,
+            packages: packs,
+            subscriptionMonthly: (sub["monthly_usd"] as? NSNumber)?.doubleValue,
+            subscriptionAnnual: (sub["annual_usd"] as? NSNumber)?.doubleValue,
+            monthlyCredits: sub["monthly_credits"] as? Int,
+            paygPerCredit: (catalog["pay_as_you_go_usd_per_credit"] as? NSNumber)?.doubleValue
+        )
+    }
+
+    /// `POST /api/property/owner-report` — spends 1 data credit, returns the
+    /// Tracerfy owner dossier (name, phones w/ DNC flags, emails, property data).
+    func ownerReport(address: String, city: String, state: String, zip: String) async throws -> OwnerReport {
         do {
             let result = try await authorizedJSON(
                 path: "api/property/owner-report",
                 method: "POST",
-                body: ["latitude": latitude, "longitude": longitude, "address": address]
+                body: ["address": address, "city": city, "state": state, "zip": zip]
             )
             guard let dict = result as? [String: Any],
                   let owner = dict["owner"] as? [String: Any] else {
                 throw OwnerLookupError.message("The owner report came back in an unexpected format.")
             }
+            let phones = (owner["phones"] as? [[String: Any]] ?? []).compactMap { p -> OwnerPhone? in
+                guard let number = p["number"] as? String, !number.isEmpty else { return nil }
+                return OwnerPhone(number: number, type: p["type"] as? String,
+                                  dnc: p["dnc"] as? Bool ?? false, carrier: p["carrier"] as? String)
+            }
             return OwnerReport(
                 name: owner["name"] as? String,
-                phone: owner["phone"] as? String,
-                email: owner["email"] as? String,
+                phones: phones,
+                emails: (owner["emails"] as? [String]) ?? [],
                 mailingAddress: owner["mailing_address"] as? String,
+                litigator: owner["litigator"] as? Bool ?? false,
                 ownerOccupied: owner["owner_occupied"] as? Bool,
-                cost: (dict["cost"] as? Double) ?? 0.99
+                propertyType: owner["property_type"] as? String,
+                yearBuilt: owner["year_built"] as? Int,
+                roofMaterial: owner["roof_material"] as? String,
+                estimatedValue: owner["estimated_value"] as? Int,
+                roofPropensityScore: owner["roof_propensity_score"] as? Int,
+                roofPropensityCategory: owner["roof_propensity_category"] as? String,
+                remainingCredits: dict["remaining_credits"] as? Int
             )
         } catch let BackendError.http(status, message) {
-            if status == 503 { throw OwnerLookupError.notConfigured }
-            if status == 404 { throw OwnerLookupError.noOwnerFound }
-            throw OwnerLookupError.message(message)
+            switch status {
+            case 503: throw OwnerLookupError.notConfigured
+            case 404: throw OwnerLookupError.noOwnerFound
+            case 402: throw OwnerLookupError.insufficientCredits
+            default: throw OwnerLookupError.message(message)
+            }
         }
     }
 
