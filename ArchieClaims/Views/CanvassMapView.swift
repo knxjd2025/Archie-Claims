@@ -1,13 +1,20 @@
 import SwiftUI
 import MapKit
 
-/// The canvassing map: tap any house to pull its address, storm history, and
-/// public contact lookups. Saved leads show as colored pins. A search bar
-/// jumps to any typed address or city (tap the dropped pin for its storm
-/// report), and +/- buttons zoom without pinching.
+/// The canvassing map — built to be the fastest door-to-door storm tool:
+///  - Storm overlay: recent NOAA SPC hail/wind/tornado reports drawn right on
+///    the map for the visible area, so you canvass where the storm actually hit.
+///  - Quick Log mode: tap a roof → two taps to log the knock (status saved,
+///    address + storm evidence fill in automatically in the background).
+///  - Status filter chips and a live "today" tally for door counts.
+///  - Search any address or city (tap the pin for its storm report), +/- zoom,
+///    satellite toggle, and status-colored lead pins.
 struct CanvassMapView: View {
     @EnvironmentObject private var leadStore: LeadStore
     @EnvironmentObject private var locationManager: LocationManager
+
+    @AppStorage(AppSettings.searchRadiusKey) private var radiusMiles = AppSettings.defaultRadiusMiles
+    @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
 
     /// Charlotte, NC — the default canvassing area for testing.
     static let charlotte = CLLocationCoordinate2D(latitude: 35.2271, longitude: -80.8431)
@@ -29,9 +36,23 @@ struct CanvassMapView: View {
     @State private var searchFailed = false
     @FocusState private var searchFocused: Bool
 
+    @State private var showStormOverlay = true
+    @State private var stormMarkers: [NearbyStormReport] = []
+    @State private var stormOverlayTask: Task<Void, Never>?
+    @State private var isLoadingStorms = false
+
+    @State private var quickLogMode = false
+    @State private var quickLogSpot: TappedSpot?
+    @State private var statusFilter: Lead.Status?
+
     struct TappedSpot: Identifiable {
         let id = UUID()
         let coordinate: CLLocationCoordinate2D
+    }
+
+    private var visibleLeads: [Lead] {
+        guard let statusFilter else { return leadStore.leads }
+        return leadStore.leads.filter { $0.status == statusFilter }
     }
 
     var body: some View {
@@ -39,6 +60,15 @@ struct CanvassMapView: View {
             MapReader { proxy in
                 Map(position: $cameraPosition) {
                     UserAnnotation()
+
+                    if showStormOverlay {
+                        ForEach(stormMarkers) { item in
+                            Annotation("", coordinate: item.report.coordinate) {
+                                stormMarker(item)
+                            }
+                            .annotationTitles(.hidden)
+                        }
+                    }
 
                     if let place = searchedPlace {
                         Annotation(place.title, coordinate: place.coordinate) {
@@ -52,7 +82,7 @@ struct CanvassMapView: View {
                         }
                     }
 
-                    ForEach(leadStore.leads) { lead in
+                    ForEach(visibleLeads) { lead in
                         Annotation(lead.shortAddress, coordinate: lead.coordinate) {
                             Image(systemName: lead.status.symbolName)
                                 .font(.caption)
@@ -61,7 +91,7 @@ struct CanvassMapView: View {
                                 .foregroundStyle(.white)
                                 .shadow(radius: 2)
                                 .onTapGesture {
-                                    tappedCoordinate = TappedSpot(coordinate: lead.coordinate)
+                                    handleTap(at: lead.coordinate)
                                 }
                         }
                     }
@@ -70,18 +100,42 @@ struct CanvassMapView: View {
                 .mapControls {
                     MapCompass()
                 }
-                .onMapCameraChange { context in
+                .onMapCameraChange(frequency: .continuous) { context in
                     visibleRegion = context.region
+                }
+                .onMapCameraChange(frequency: .onEnd) { context in
+                    visibleRegion = context.region
+                    scheduleStormOverlayRefresh(for: context.region)
                 }
                 .onTapGesture { screenPoint in
                     guard let coordinate = proxy.convert(screenPoint, from: .local) else { return }
                     searchFocused = false
-                    tappedCoordinate = TappedSpot(coordinate: coordinate)
+                    handleTap(at: coordinate)
                 }
             }
             .navigationTitle("Canvass")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        withAnimation { quickLogMode.toggle() }
+                    } label: {
+                        Image(systemName: quickLogMode ? "bolt.fill" : "bolt")
+                            .foregroundStyle(quickLogMode ? Color.orange : Color.accentColor)
+                    }
+                    .accessibilityLabel(quickLogMode ? "Quick Log on — taps log doors" : "Turn on Quick Log")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showStormOverlay.toggle()
+                        if showStormOverlay, let region = visibleRegion {
+                            scheduleStormOverlayRefresh(for: region)
+                        }
+                    } label: {
+                        Image(systemName: showStormOverlay ? "cloud.bolt.rain.fill" : "cloud.bolt.rain")
+                    }
+                    .accessibilityLabel("Toggle storm report overlay")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         useHybrid.toggle()
@@ -92,25 +146,51 @@ struct CanvassMapView: View {
                 }
             }
             .overlay(alignment: .top) {
-                searchOverlay
+                VStack(spacing: 6) {
+                    searchOverlay
+                    if !leadStore.leads.isEmpty {
+                        statusChips
+                    }
+                    if quickLogMode {
+                        Text("⚡️ Quick Log on — tap a roof, pick a status")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Color.orange.opacity(0.92), in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                }
             }
             .overlay(alignment: .bottomTrailing) {
                 zoomControls
             }
             .overlay(alignment: .bottom) {
-                if leadStore.leads.isEmpty && !searchFocused {
-                    Text("Tap a rooftop to pull its storm report")
-                        .font(.footnote.weight(.medium))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(.bottom, 12)
-                }
+                bottomBar
             }
             .sheet(item: $tappedCoordinate) { spot in
                 PropertySheetView(coordinate: spot.coordinate)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .confirmationDialog(
+                "Log this door",
+                isPresented: Binding(
+                    get: { quickLogSpot != nil },
+                    set: { if !$0 { quickLogSpot = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let spot = quickLogSpot {
+                    Button("Not Home") { quickLog(.notHome, at: spot.coordinate) }
+                    Button("Interested") { quickLog(.interested, at: spot.coordinate) }
+                    Button("Appointment Set") { quickLog(.appointment, at: spot.coordinate) }
+                    Button("Not Interested") { quickLog(.notInterested, at: spot.coordinate) }
+                    Button("Signed!") { quickLog(.signed, at: spot.coordinate) }
+                    Button("Full Details…") { tappedCoordinate = spot }
+                    Button("Cancel", role: .cancel) {}
+                }
+            } message: {
+                Text("Address and storm evidence are saved automatically.")
             }
             .onAppear {
                 if locationManager.authorization == .notDetermined {
@@ -120,6 +200,168 @@ struct CanvassMapView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Tap routing
+
+    private func handleTap(at coordinate: CLLocationCoordinate2D) {
+        if quickLogMode {
+            quickLogSpot = TappedSpot(coordinate: coordinate)
+        } else {
+            tappedCoordinate = TappedSpot(coordinate: coordinate)
+        }
+    }
+
+    // MARK: - Quick log
+
+    private func quickLog(_ status: Lead.Status, at coordinate: CLLocationCoordinate2D) {
+        if var existing = leadStore.lead(near: coordinate.latitude, longitude: coordinate.longitude) {
+            existing.status = status
+            leadStore.update(existing)
+            return
+        }
+
+        let lead = Lead(
+            status: status,
+            address: "Locating address…",
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
+        leadStore.add(lead)
+
+        // Address + storm evidence fill in behind the scenes — the canvasser
+        // is already walking to the next door.
+        let radius = radiusMiles
+        let lookback = lookbackDays
+        Task {
+            var updated = lead
+            if let geocode = await GeocodingService.reverseGeocode(coordinate) {
+                updated.address = geocode.address
+            } else {
+                updated.address = String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)
+            }
+            let reports = await StormDataService.shared.reports(
+                near: coordinate,
+                radiusMiles: radius,
+                lookbackDays: lookback
+            )
+            updated.stormSummary = StormDataService.summary(of: reports, lookbackDays: lookback)
+            leadStore.update(updated)
+        }
+    }
+
+    // MARK: - Storm overlay
+
+    private func stormMarker(_ item: NearbyStormReport) -> some View {
+        Image(systemName: item.report.kind.symbolName)
+            .font(.system(size: 11, weight: .bold))
+            .padding(5)
+            .background(color(for: item.report.kind).opacity(0.85), in: Circle())
+            .foregroundStyle(.white)
+            .shadow(radius: 1)
+            .onTapGesture {
+                tappedCoordinate = TappedSpot(coordinate: item.report.coordinate)
+            }
+    }
+
+    private func scheduleStormOverlayRefresh(for region: MKCoordinateRegion) {
+        guard showStormOverlay else { return }
+        stormOverlayTask?.cancel()
+        stormOverlayTask = Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            isLoadingStorms = true
+            // Cover the visible area, but stay within sane fetch bounds.
+            let radius = min(max(region.span.latitudeDelta * 69 * 0.75, 2), 60)
+            let reports = await StormDataService.shared.reports(
+                near: region.center,
+                radiusMiles: radius,
+                lookbackDays: lookbackDays
+            )
+            guard !Task.isCancelled else { return }
+            stormMarkers = Array(reports.prefix(80))
+            isLoadingStorms = false
+        }
+    }
+
+    private func color(for kind: StormReport.Kind) -> Color {
+        switch kind {
+        case .hail: return .orange
+        case .wind: return .blue
+        case .tornado: return .red
+        }
+    }
+
+    // MARK: - Status chips & stats
+
+    private var statusChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                chip(label: "All (\(leadStore.leads.count))", isOn: statusFilter == nil) {
+                    statusFilter = nil
+                }
+                ForEach(Lead.Status.allCases) { status in
+                    let count = leadStore.leads.filter { $0.status == status }.count
+                    if count > 0 {
+                        chip(label: "\(status.rawValue) (\(count))", isOn: statusFilter == status) {
+                            statusFilter = (statusFilter == status) ? nil : status
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    private func chip(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isOn ? Color.accentColor : Color(.systemBackground).opacity(0.9), in: Capsule())
+                .foregroundStyle(isOn ? .white : .primary)
+                .shadow(color: .black.opacity(0.1), radius: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var bottomBar: some View {
+        Group {
+            if leadStore.leads.isEmpty {
+                if !searchFocused {
+                    Text(quickLogMode
+                         ? "Tap a roof to log your first door"
+                         : "Tap a rooftop to pull its storm report")
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+            } else {
+                todayStats
+            }
+        }
+        .padding(.bottom, 12)
+    }
+
+    private var todayStats: some View {
+        let calendar = Calendar.current
+        let today = leadStore.leads.filter { calendar.isDateInToday($0.updatedAt) }
+        let appointments = today.filter { $0.status == .appointment }.count
+        let interested = today.filter { $0.status == .interested }.count
+        let signed = today.filter { $0.status == .signed }.count
+
+        var parts = ["Today: \(today.count) door\(today.count == 1 ? "" : "s")"]
+        if interested > 0 { parts.append("\(interested) interested") }
+        if appointments > 0 { parts.append("\(appointments) appt\(appointments == 1 ? "" : "s")") }
+        if signed > 0 { parts.append("\(signed) signed 🎉") }
+
+        return Text(parts.joined(separator: " · "))
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
     }
 
     // MARK: - Search
