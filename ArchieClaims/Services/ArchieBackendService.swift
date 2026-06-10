@@ -113,6 +113,21 @@ struct ArchieBackendService {
         return email
     }
 
+    /// `DELETE /api/auth/account` — permanently deletes the signed-in account
+    /// (required in-app by App Store Guideline 5.1.1(v)). The backend re-checks
+    /// the password (read from the Keychain) so a stolen token alone can't
+    /// delete an account. Clears the local session on success.
+    func deleteAccount() async throws {
+        guard let password = KeychainStore.read(account: KeychainStore.archiePasswordAccount),
+              !password.isEmpty else {
+            throw BackendError.notSignedIn
+        }
+        _ = try await authorizedJSON(
+            path: "api/auth/account", method: "DELETE", body: ["password": password]
+        )
+        Self.signOut()
+    }
+
     /// Clears the stored Archie session and credentials.
     static func signOut() {
         KeychainStore.delete(account: KeychainStore.archieTokenAccount)

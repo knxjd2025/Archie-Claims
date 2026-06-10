@@ -5,7 +5,12 @@ struct SettingsView: View {
     @AppStorage(AppSettings.searchRadiusKey) private var radiusMiles = AppSettings.defaultRadiusMiles
     @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
 
+    @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
+
     @State private var signedInEmail: String?
+    @State private var showDeleteConfirm = false
+    @State private var deleting = false
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack {
@@ -17,6 +22,27 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear {
                 signedInEmail = ArchieBackendService.signedInEmail
+            }
+            .confirmationDialog(
+                "Delete your account?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Account", role: .destructive) { deleteAccount() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes your Archie account and personal information. Purchased credits are forfeited. This can't be undone.")
+            }
+            .alert(
+                "Couldn't Delete Account",
+                isPresented: Binding(
+                    get: { deleteError != nil },
+                    set: { if !$0 { deleteError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
             }
         }
     }
@@ -51,12 +77,42 @@ struct SettingsView: View {
                 ArchieBackendService.signOut()
                 self.signedInEmail = nil
             }
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                HStack {
+                    Text("Delete Account")
+                    if deleting {
+                        Spacer()
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .disabled(deleting)
         } else {
             ArchieAccountForm { email in
                 signedInEmail = email
                 // Drain any leads queued while signed out.
                 syncService.requestSync()
             }
+        }
+    }
+
+    /// Calls the backend to permanently delete the account, then clears the
+    /// local session (the service signs out on success).
+    private func deleteAccount() {
+        deleting = true
+        Task {
+            do {
+                let service = ArchieBackendService(
+                    baseURL: AppSettings.archieBaseURL(from: archieBaseURL)
+                )
+                try await service.deleteAccount()
+                signedInEmail = nil
+            } catch {
+                deleteError = error.localizedDescription
+            }
+            deleting = false
         }
     }
 

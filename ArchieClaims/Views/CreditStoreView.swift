@@ -17,6 +17,7 @@ struct CreditStoreView: View {
     @State private var balance: Int = 0
     @State private var message: String?
     @State private var working = false
+    @State private var restoring = false
 
     private var service: ArchieBackendService {
         ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
@@ -60,6 +61,35 @@ struct CreditStoreView: View {
 
                 if let message {
                     Section { Text(message).font(.caption).foregroundStyle(.secondary) }
+                }
+
+                Section {
+                    Button {
+                        restorePurchases()
+                    } label: {
+                        HStack {
+                            Text("Restore Purchases")
+                            if restoring {
+                                Spacer()
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    }
+                    .disabled(restoring)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("""
+                        Subscriptions renew automatically unless cancelled at least 24 hours before \
+                        the end of the current period. Manage or cancel anytime in Settings → \
+                        Apple Account → Subscriptions. Payment is charged to your Apple Account.
+                        """)
+                        HStack(spacing: 6) {
+                            Link("Privacy Policy", destination: URL(string: "https://app.archie.now/privacy.html")!)
+                            Text("·")
+                            Link("Terms of Use", destination: URL(string: "https://app.archie.now/terms.html")!)
+                        }
+                    }
+                    .font(.caption2)
                 }
             }
             .navigationTitle("Data Credits")
@@ -139,6 +169,23 @@ struct CreditStoreView: View {
             } catch {
                 message = error.localizedDescription
             }
+        }
+    }
+
+    /// Re-syncs the App Store transaction history (App Review requires a visible
+    /// restore mechanism), then redeems anything unfinished with the backend.
+    private func restorePurchases() {
+        message = nil
+        restoring = true
+        Task {
+            do {
+                try await AppStore.sync()
+                await store.redeemPending()
+                message = "Purchases restored. Any credits that hadn't arrived have been re-applied."
+            } catch {
+                message = error.localizedDescription
+            }
+            restoring = false
         }
     }
 
