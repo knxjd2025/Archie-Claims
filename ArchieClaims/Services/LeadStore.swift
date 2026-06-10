@@ -32,7 +32,17 @@ final class LeadStore: ObservableObject {
 
     func update(_ lead: Lead) {
         guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
-        var updated = lead
+        // Copy only user-editable fields onto the LIVE store entry so a stale
+        // view snapshot (or a late background fill-in) can't clobber the
+        // server-assigned sync fields (CRM ids, sync state).
+        var updated = leads[index]
+        updated.status = lead.status
+        updated.homeownerName = lead.homeownerName
+        updated.phone = lead.phone
+        updated.notes = lead.notes
+        updated.address = lead.address
+        updated.stormSummary = lead.stormSummary
+        updated.lastKnockAt = lead.lastKnockAt
         updated.updatedAt = Date()
         markDirty(&updated)
         leads[index] = updated
@@ -120,7 +130,9 @@ final class LeadStore: ObservableObject {
             if update.ok {
                 leads[i].syncState = (leads[i].syncState == .syncing) ? .synced : .queued
                 leads[i].syncError = nil
-            } else {
+            } else if leads[i].syncState == .syncing {
+                // Only mark failed if still in-flight; a lead edited mid-request
+                // (bumped to .queued) keeps its newer state to re-send.
                 leads[i].syncState = .failed
                 leads[i].syncError = update.error
             }

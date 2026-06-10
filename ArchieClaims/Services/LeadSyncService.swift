@@ -31,7 +31,12 @@ final class LeadSyncService: ObservableObject {
     private var isOnline = true
 
     private var debounceTask: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
     private var retryCount = 0
+    private var isStarted = false
+    /// Running total of free-tier deferred leads within one continuous drain,
+    /// so the nudge shows the session total instead of just the last batch.
+    private var sessionDeferredCount = 0
 
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -54,8 +59,12 @@ final class LeadSyncService: ObservableObject {
         refreshPending()
     }
 
-    /// Begins network monitoring and does an initial drain. Call once at launch.
+    /// Begins network monitoring and does an initial drain. Idempotent — the
+    /// SwiftUI `.task` that calls this can re-run on scene re-appearance, and
+    /// an NWPathMonitor can only be started once per instance.
     func start() {
+        guard !isStarted else { requestSync(); return }
+        isStarted = true
         monitor.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
             Task { @MainActor in
@@ -88,6 +97,7 @@ final class LeadSyncService: ObservableObject {
     /// Forces an immediate drain (manual "Push" / "Send to CRM" buttons).
     func pushNow() {
         debounceTask?.cancel()
+        retryTask?.cancel()
         Task { await syncNow() }
     }
 
@@ -145,13 +155,22 @@ final class LeadSyncService: ObservableObject {
             retryCount = 0
             handleFreeLimit(dict?["free_limit"] as? [String: Any])
 
-            // More queued than one batch could hold → keep draining.
-            if store.pendingSyncCount > 0, updates.contains(where: { $0.ok }) {
+            // Keep draining only when the next batch holds genuinely fresh
+            // (non-failed) work — items never attempted. A fully-failed batch
+            // must NOT self-retrigger: failed leads sit at the front of the
+            // queue, so it would tight-loop on them. Those wait for the next
+            // external trigger (foreground / network / manual / edit).
+            let next = store.leadsPendingSync(limit: Self.maxBatch)
+            if next.contains(where: { $0.effectiveSyncState != .failed }) {
                 requestSync()
+            } else if store.pendingSyncCount == 0 {
+                sessionDeferredCount = 0 // queue fully drained → reset the nudge tally
             }
         } catch ArchieBackendService.BackendError.notSignedIn,
                 ArchieBackendService.BackendError.sessionExpired {
-            // Leave queued; they'll go out after the user signs in again.
+            // Not transient — leave queued; they go out after the user signs in
+            // again. Restart backoff so the next session starts fresh.
+            retryCount = 0
             store.markSyncFailed(ids, error: "not_signed_in")
         } catch {
             store.markSyncFailed(ids, error: error.localizedDescription)
@@ -161,18 +180,23 @@ final class LeadSyncService: ObservableObject {
     }
 
     private func scheduleRetry() {
+        retryTask?.cancel()
         retryCount = min(retryCount + 1, 5)
         let delay = Duration.seconds(min(60, 5 * (1 << (retryCount - 1)))) // 5,10,20,40,60s
-        Task { [weak self] in
+        retryTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
-            await self.syncNow()
+            // Route through the debounce/isSyncing path so the retry queues
+            // behind an in-flight sync instead of being dropped by the guard.
+            self.requestSync()
         }
     }
 
     private func handleFreeLimit(_ freeLimit: [String: Any]?) {
         guard let deferred = freeLimit?["deferred"] as? Int, deferred > 0 else { return }
-        freeLimitNudge = "\(deferred) lead\(deferred == 1 ? "" : "s") need a paid Archie plan to land in your CRM pipeline. The knocks are still saved on the canvassing map."
+        sessionDeferredCount += deferred
+        let n = sessionDeferredCount
+        freeLimitNudge = "\(n) lead\(n == 1 ? "" : "s") need a paid Archie plan to land in your CRM pipeline. The knocks are still saved on the canvassing map."
     }
 
     // MARK: - Wire payload
