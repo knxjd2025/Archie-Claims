@@ -79,6 +79,61 @@ extension ArchieBackendService {
         }
     }
 
+    // MARK: - Paid owner report
+
+    struct OwnerReport {
+        let name: String?
+        let phone: String?
+        let email: String?
+        let mailingAddress: String?
+        let ownerOccupied: Bool?
+        let cost: Double
+    }
+
+    enum OwnerLookupError: LocalizedError {
+        case notConfigured
+        case noOwnerFound
+        case message(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notConfigured:
+                return "Paid owner lookup isn't set up yet. An admin needs to add a data provider in the Archie backend."
+            case .noOwnerFound:
+                return "No owner record was found for this property."
+            case .message(let m):
+                return m
+            }
+        }
+    }
+
+    /// `POST /api/property/owner-report` — paid ($0.99) owner identity lookup.
+    func ownerReport(latitude: Double, longitude: Double, address: String) async throws -> OwnerReport {
+        do {
+            let result = try await authorizedJSON(
+                path: "api/property/owner-report",
+                method: "POST",
+                body: ["latitude": latitude, "longitude": longitude, "address": address]
+            )
+            guard let dict = result as? [String: Any],
+                  let owner = dict["owner"] as? [String: Any] else {
+                throw OwnerLookupError.message("The owner report came back in an unexpected format.")
+            }
+            return OwnerReport(
+                name: owner["name"] as? String,
+                phone: owner["phone"] as? String,
+                email: owner["email"] as? String,
+                mailingAddress: owner["mailing_address"] as? String,
+                ownerOccupied: owner["owner_occupied"] as? Bool,
+                cost: (dict["cost"] as? Double) ?? 0.99
+            )
+        } catch let BackendError.http(status, message) {
+            if status == 503 { throw OwnerLookupError.notConfigured }
+            if status == 404 { throw OwnerLookupError.noOwnerFound }
+            throw OwnerLookupError.message(message)
+        }
+    }
+
     // MARK: - Client search & context
 
     /// `GET /api/crm-dashboard/search` — one search across leads and jobs
