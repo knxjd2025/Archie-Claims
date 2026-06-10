@@ -1,9 +1,12 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// "Archie" — the AI roofing claim assistant. By default it talks to the main
 /// Archie CRM backend (sign in with your Archie account); a legacy
 /// direct-Anthropic mode with a user-supplied key remains under Settings →
-/// Advanced.
+/// Advanced. Attach a CRM client to give Archie their claim profile, docs,
+/// and communication history; attach insurance documents or pasted emails to
+/// discuss them (and file them to the client's claim in the CRM).
 struct AssistantView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -18,7 +21,32 @@ struct AssistantView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var errorText: String?
     @State private var showAuthSheet = false
+    @State private var showClientPicker = false
+    @State private var showEmailPaste = false
+    @State private var showFileImporter = false
+    @State private var attachedClient: ArchieBackendService.ClientAttachment?
+    @State private var attachments: [ChatAttachment] = []
     @FocusState private var composerFocused: Bool
+
+    /// A document or pasted email staged for the next message.
+    struct ChatAttachment: Identifiable {
+        enum Kind { case document, email }
+        let id = UUID()
+        let kind: Kind
+        let name: String
+        let text: String
+        let data: Data?
+        let mimeType: String
+        var crmStatus: String? = nil
+    }
+
+    private var assistantMode: AppSettings.AssistantMode {
+        AppSettings.assistantMode(from: assistantModeRaw)
+    }
+
+    private var archieService: ArchieBackendService {
+        ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
+    }
 
     private let quickPrompts = [
         "Write a 20-second door script for a neighborhood that just took hail",
@@ -30,6 +58,9 @@ struct AssistantView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if let client = attachedClient {
+                    clientBanner(client)
+                }
                 if let context = appState.pendingPropertyContext {
                     contextBanner(context)
                 }
@@ -60,6 +91,9 @@ struct AssistantView: View {
                     }
                 }
 
+                if !attachments.isEmpty {
+                    attachmentChips
+                }
                 composer
             }
             .navigationTitle("Archie AI")
@@ -69,7 +103,40 @@ struct AssistantView: View {
                     errorText = nil
                 }
             }
+            .sheet(isPresented: $showClientPicker) {
+                ClientPickerSheet { attachment in
+                    attachedClient = attachment
+                }
+            }
+            .sheet(isPresented: $showEmailPaste) {
+                EmailPasteSheet(clientName: attachedClient?.displayName) { subject, body in
+                    addEmailAttachment(subject: subject, body: body)
+                }
+            }
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.pdf, .image, .plainText, .emailMessage],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    addDocumentAttachment(from: url)
+                }
+            }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if ArchieBackendService.signedInEmail == nil {
+                            showAuthSheet = true
+                        } else {
+                            showClientPicker = true
+                        }
+                    } label: {
+                        Image(systemName: attachedClient == nil
+                              ? "person.crop.circle.badge.plus"
+                              : "person.crop.circle.badge.checkmark")
+                    }
+                    .accessibilityLabel(attachedClient == nil ? "Attach a client" : "Change attached client")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         messages.removeAll()
@@ -91,7 +158,7 @@ struct AssistantView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("👋 I'm Archie")
                     .font(.title2.bold())
-                Text("Your storm claim sidekick — door scripts, damage documentation, claim explanations, follow-ups. Tap a house on the map and choose **Ask Archie** to bring its storm data with you.")
+                Text("Your storm claim sidekick — door scripts, damage documentation, claim explanations, follow-ups. Attach a client (👤) to bring in their claim profile and CRM history, or attach an insurance estimate, doc, or email (📎) to work through it together.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text("AI guidance only — not legal or insurance advice.")
@@ -100,8 +167,7 @@ struct AssistantView: View {
             }
             .padding(.horizontal)
 
-            if AppSettings.assistantMode(from: assistantModeRaw) == .archie,
-               ArchieBackendService.signedInEmail == nil {
+            if assistantMode == .archie, ArchieBackendService.signedInEmail == nil {
                 Button {
                     showAuthSheet = true
                 } label: {
@@ -134,6 +200,32 @@ struct AssistantView: View {
         .padding(.top, 8)
     }
 
+    private func clientBanner(_ client: ArchieBackendService.ClientAttachment) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "person.crop.circle.fill")
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Client attached — Archie can use their CRM data")
+                    .font(.caption.weight(.semibold))
+                Text(client.summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                attachedClient = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityLabel("Detach client")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+    }
+
     private func contextBanner(_ context: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "house.fill")
@@ -159,8 +251,64 @@ struct AssistantView: View {
         .background(.ultraThinMaterial)
     }
 
+    private var attachmentChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments) { attachment in
+                    HStack(spacing: 6) {
+                        Image(systemName: attachment.kind == .email ? "envelope.fill" : "doc.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(attachment.name)
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+                            if let status = attachment.crmStatus {
+                                Text(status)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Button {
+                            attachments.removeAll { $0.id == attachment.id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel("Remove \(attachment.name)")
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 4)
+    }
+
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            Menu {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("Attach document (PDF, photo…)", systemImage: "doc.badge.plus")
+                }
+                Button {
+                    showEmailPaste = true
+                } label: {
+                    Label("Paste email / correspondence", systemImage: "envelope.badge")
+                }
+            } label: {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 22))
+                    .frame(width: 32, height: 36)
+            }
+            .disabled(isStreaming)
+            .accessibilityLabel("Attach a document or email")
+
             TextField("Ask about claims, scripts, damage…", text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .padding(.horizontal, 12)
@@ -179,11 +327,116 @@ struct AssistantView: View {
                 Image(systemName: isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 30))
             }
-            .disabled(!isStreaming && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(!isStreaming
+                      && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && attachments.isEmpty)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.bar)
+    }
+
+    // MARK: - Attachments
+
+    private func addDocumentAttachment(from url: URL) {
+        errorText = nil
+        Task {
+            do {
+                let extraction = try await DocumentTextExtractor.extract(from: url)
+                var attachment = ChatAttachment(
+                    kind: .document,
+                    name: extraction.filename,
+                    text: extraction.text,
+                    data: extraction.data,
+                    mimeType: extraction.mimeType
+                )
+                attachment.crmStatus = crmPushPlanned ? "Saving to claim…" : nil
+                attachments.append(attachment)
+                if crmPushPlanned {
+                    pushDocumentToCRM(attachment)
+                }
+            } catch {
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func addEmailAttachment(subject: String, body: String) {
+        let name = subject.isEmpty ? "Pasted email" : subject
+        var attachment = ChatAttachment(
+            kind: .email,
+            name: name,
+            text: body,
+            data: nil,
+            mimeType: "text/plain"
+        )
+        let canLog = attachedClient != nil && (attachedClient?.leadID != nil || attachedClient?.jobID != nil)
+        attachment.crmStatus = canLog ? "Logging to CRM…" : nil
+        attachments.append(attachment)
+
+        guard canLog, let client = attachedClient else { return }
+        let attachmentID = attachment.id
+        Task {
+            do {
+                try await archieService.logCommunication(
+                    leadID: client.leadID,
+                    jobID: client.jobID,
+                    type: "email",
+                    title: name,
+                    description: body
+                )
+                setCRMStatus("Logged to \(client.displayName)'s CRM history", for: attachmentID)
+            } catch {
+                setCRMStatus("CRM log failed — still used in chat", for: attachmentID)
+            }
+        }
+    }
+
+    /// Files are pushed to the CRM only when a client with a claim is attached.
+    private var crmPushPlanned: Bool {
+        assistantMode == .archie
+            && ArchieBackendService.signedInEmail != nil
+            && attachedClient?.claimID != nil
+    }
+
+    private func pushDocumentToCRM(_ attachment: ChatAttachment) {
+        guard let claimID = attachedClient?.claimID, let data = attachment.data else { return }
+        let attachmentID = attachment.id
+        Task {
+            do {
+                let url = try await archieService.uploadFile(
+                    data: data,
+                    filename: attachment.name,
+                    mimeType: attachment.mimeType
+                )
+                try await archieService.registerClaimDocument(
+                    claimID: claimID,
+                    name: attachment.name,
+                    fileURL: url,
+                    documentType: Self.documentType(for: attachment),
+                    fileSize: data.count,
+                    mimeType: attachment.mimeType,
+                    notes: "Uploaded from Archie Claims iOS"
+                )
+                setCRMStatus("Saved to claim ✓", for: attachmentID)
+            } catch {
+                setCRMStatus("Claim upload failed — still used in chat", for: attachmentID)
+            }
+        }
+    }
+
+    private static func documentType(for attachment: ChatAttachment) -> String {
+        let lowered = attachment.name.lowercased()
+        if attachment.mimeType.hasPrefix("image/") { return "photo" }
+        if lowered.contains("denial") { return "denial_letter" }
+        if lowered.contains("estimate") || lowered.contains("xactimate") { return "estimate" }
+        return "correspondence"
+    }
+
+    private func setCRMStatus(_ status: String, for id: UUID) {
+        if let index = attachments.firstIndex(where: { $0.id == id }) {
+            attachments[index].crmStatus = status
+        }
     }
 
     // MARK: - Sending
@@ -191,9 +444,9 @@ struct AssistantView: View {
     private func send() {
         guard !isStreaming else { return }
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
-        let mode = AppSettings.assistantMode(from: assistantModeRaw)
+        let mode = assistantMode
         var legacyAPIKey = ""
         switch mode {
         case .archie:
@@ -213,12 +466,25 @@ struct AssistantView: View {
         draft = ""
         composerFocused = false
 
-        // Attach property context (once) as a tagged block in the user turn.
-        var outgoingText = trimmed
+        // Build the outgoing turn: tagged context blocks first, question last.
+        var blocks: [String] = []
+        for attachment in attachments {
+            switch attachment.kind {
+            case .document:
+                blocks.append("<attached_document name=\"\(attachment.name)\">\n\(attachment.text)\n</attached_document>")
+            case .email:
+                blocks.append("<email_communication subject=\"\(attachment.name)\">\n\(attachment.text)\n</email_communication>")
+            }
+        }
         if let context = appState.pendingPropertyContext {
-            outgoingText = "<property_context>\n\(context)\n</property_context>\n\n\(trimmed)"
+            blocks.append("<property_context>\n\(context)\n</property_context>")
             appState.pendingPropertyContext = nil
         }
+        let question = trimmed.isEmpty
+            ? "Review the attached material and summarize the key points, amounts, and anything that needs my attention for this claim."
+            : trimmed
+        let outgoingText = (blocks + [question]).joined(separator: "\n\n")
+        attachments = []
 
         let userMessage = ChatMessage(role: .user, text: outgoingText)
         messages.append(userMessage)
@@ -231,8 +497,7 @@ struct AssistantView: View {
         let stream: AsyncThrowingStream<String, Error>
         switch mode {
         case .archie:
-            let service = ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
-            stream = service.streamReply(history: history)
+            stream = archieService.streamReply(history: history, clientContext: attachedClient?.context)
         case .anthropic:
             let service = ClaudeService(
                 apiKey: legacyAPIKey,
@@ -268,7 +533,8 @@ struct AssistantView: View {
     }
 }
 
-/// A chat bubble. Assistant text renders basic Markdown.
+/// A chat bubble. Assistant text renders basic Markdown; machine-readable
+/// context blocks in user turns are collapsed into attachment chips.
 struct MessageBubble: View {
     let message: ChatMessage
 
@@ -300,13 +566,37 @@ struct MessageBubble: View {
         .padding(.horizontal)
     }
 
-    /// Hide the machine-readable property context block from the bubble.
+    /// Collapses leading machine-readable blocks into short chips so the
+    /// bubble shows what was attached without the raw payload.
     private var displayUserText: String {
-        guard message.text.hasPrefix("<property_context>"),
-              let range = message.text.range(of: "</property_context>") else {
-            return message.text
+        var remaining = Substring(message.text)
+        var chips: [String] = []
+
+        let tags: [(tag: String, chip: (String?) -> String)] = [
+            ("property_context", { _ in "🏠 [Property storm data attached]" }),
+            ("attached_document", { name in "📎 [Document: \(name ?? "attachment")]" }),
+            ("email_communication", { name in "✉️ [Email: \(name ?? "correspondence")]" })
+        ]
+
+        outer: while true {
+            let trimmed = remaining.drop(while: { $0.isWhitespace || $0.isNewline })
+            for entry in tags where trimmed.hasPrefix("<\(entry.tag)") {
+                guard let close = trimmed.range(of: "</\(entry.tag)>") else { break outer }
+                let opening = trimmed[..<close.lowerBound]
+                var name: String?
+                if let attrStart = opening.range(of: "=\""),
+                   let attrEnd = opening[attrStart.upperBound...].firstIndex(of: "\"") {
+                    name = String(opening[attrStart.upperBound..<attrEnd])
+                }
+                chips.append(entry.chip(name))
+                remaining = trimmed[close.upperBound...]
+                continue outer
+            }
+            remaining = trimmed
+            break
         }
-        let visible = String(message.text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return "🏠 [Property storm data attached]\n\(visible)"
+
+        let visible = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (chips + (visible.isEmpty ? [] : [visible])).joined(separator: "\n")
     }
 }

@@ -185,11 +185,16 @@ struct ArchieBackendService {
     /// Sends the conversation to the Archie backend and yields the reply.
     /// The endpoint is not streaming, so the full reply arrives as one delta —
     /// the stream interface keeps `AssistantView` agnostic of the backend.
-    func streamReply(history: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
+    /// `clientContext` is forwarded as `context.current_project`, which the
+    /// server injects into the system prompt (the attached client's CRM data).
+    func streamReply(
+        history: [ChatMessage],
+        clientContext: [String: Any]? = nil
+    ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let reply = try await chat(history: history)
+                    let reply = try await chat(history: history, clientContext: clientContext)
                     continuation.yield(reply)
                     continuation.finish()
                 } catch {
@@ -202,7 +207,7 @@ struct ArchieBackendService {
 
     /// `POST /api/ai-assistant` with `action: "chat"`. The last user turn is
     /// sent as `question`; everything before it as `conversation_history`.
-    func chat(history: [ChatMessage]) async throws -> String {
+    func chat(history: [ChatMessage], clientContext: [String: Any]? = nil) async throws -> String {
         guard var token = KeychainStore.read(account: KeychainStore.archieTokenAccount),
               !token.isEmpty else {
             throw BackendError.notSignedIn
@@ -221,7 +226,8 @@ struct ArchieBackendService {
             let (data, status) = try await postChat(
                 token: token,
                 question: lastUserTurn.text,
-                conversationHistory: Array(priorTurns)
+                conversationHistory: Array(priorTurns),
+                clientContext: clientContext
             )
 
             if status == 401, attempt == 1 {
@@ -245,18 +251,23 @@ struct ArchieBackendService {
     private func postChat(
         token: String,
         question: String,
-        conversationHistory: [[String: String]]
+        conversationHistory: [[String: String]],
+        clientContext: [String: Any]?
     ) async throws -> (Data, Int) {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/ai-assistant"))
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "action": "chat",
             "question": question,
             "conversation_history": conversationHistory
-        ])
+        ]
+        if let clientContext {
+            body["context"] = ["current_project": clientContext]
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw BackendError.malformedResponse }

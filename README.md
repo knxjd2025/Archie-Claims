@@ -4,8 +4,8 @@
 
 | Tab | What it does |
 |---|---|
-| **Canvass** | Live map (standard/satellite). Tap a rooftop → reverse-geocoded address + storm evidence + contact lookups. Saved leads show as status-colored pins. |
-| **Archie AI** | Claim assistant chat: door scripts, ACV/RCV explanations, photo checklists, follow-up texts. Attach a property's storm data with one tap ("Ask Archie"). |
+| **Canvass** | Live map (standard/satellite) starting over Charlotte, NC. Search any address or city, tap a rooftop → reverse-geocoded address + storm evidence + contact lookups. Saved leads show as status-colored pins; +/− buttons and pinch to zoom. |
+| **Archie AI** | Claim assistant chat: door scripts, ACV/RCV explanations, photo checklists, follow-up texts. Attach a property's storm data ("Ask Archie"), attach a CRM client (claim profile, docs, communications pulled from app.archie.now), or attach insurance estimates/PDFs/photos/emails — files get text-extracted on-device for the chat and filed to the client's claim in the CRM. |
 | **Leads** | Every door you've knocked: status (Not Home → Signed), homeowner info, notes, call & share. Stored 100% on-device. |
 | **Settings** | Archie account sign-in (Keychain), storm search radius & lookback, data attribution. |
 
