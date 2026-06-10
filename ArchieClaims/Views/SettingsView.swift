@@ -4,20 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject private var syncService: LeadSyncService
     @AppStorage(AppSettings.searchRadiusKey) private var radiusMiles = AppSettings.defaultRadiusMiles
     @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
-    @AppStorage(AppSettings.modelOverrideKey) private var modelOverride = ""
-    @AppStorage(AppSettings.proxyBaseURLKey) private var proxyBaseURL = ""
-    @AppStorage(AppSettings.assistantModeKey) private var assistantModeRaw = ""
-    @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
     @State private var signedInEmail: String?
-    @State private var apiKeyDraft = ""
-    @State private var hasStoredKey = false
-    @State private var showSavedConfirmation = false
-    @State private var showAdvanced = false
-
-    private var assistantMode: AppSettings.AssistantMode {
-        AppSettings.assistantMode(from: assistantModeRaw)
-    }
 
     var body: some View {
         NavigationStack {
@@ -28,11 +16,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear {
-                hasStoredKey = (KeychainStore.read()?.isEmpty == false)
                 signedInEmail = ArchieBackendService.signedInEmail
-            }
-            .alert("API key saved to Keychain", isPresented: $showSavedConfirmation) {
-                Button("OK", role: .cancel) {}
             }
         }
     }
@@ -41,40 +25,11 @@ struct SettingsView: View {
 
     private var aiSection: some View {
         Section {
-            if assistantMode == .archie {
-                archieAccountRows
-            } else {
-                anthropicKeyRows
-            }
-
-            DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
-                Picker("AI backend", selection: $assistantModeRaw) {
-                    Text("Archie account").tag("")
-                    Text("Anthropic API key").tag(AppSettings.AssistantMode.anthropic.rawValue)
-                }
-                if assistantMode == .archie {
-                    TextField("Backend URL (default: \(ArchieBackendService.defaultBaseURL.absoluteString))", text: $archieBaseURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                } else {
-                    TextField("Model (default: \(ClaudeService.defaultModel))", text: $modelOverride)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("Proxy base URL (optional, https://…)", text: $proxyBaseURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                }
-            }
+            archieAccountRows
         } header: {
-            Text("AI Assistant")
+            Text("Account")
         } footer: {
-            if assistantMode == .archie {
-                Text("One Archie account for everything — this app and app.archie.now share the same accounts, backend, and company profile. New accounts are free. Your password is stored in the device Keychain only to refresh your session.")
-            } else {
-                Text("Archie runs on Claude Opus 4.8 using your own Anthropic API key. The key never leaves this device except to call the API directly. Usage is billed to your Anthropic account.")
-            }
+            Text("Sign in with your Archie account to turn on the AI assistant, owner lookups, and CRM sync. New accounts are free. Your password is stored only in this device's Keychain to keep you signed in.")
         }
     }
 
@@ -104,42 +59,6 @@ struct SettingsView: View {
             }
         }
     }
-
-    @ViewBuilder
-    private var anthropicKeyRows: some View {
-        HStack {
-            Image(systemName: hasStoredKey ? "checkmark.seal.fill" : "key.fill")
-                .foregroundStyle(hasStoredKey ? .green : .secondary)
-            Text(hasStoredKey ? "API key on file (stored in Keychain)" : "No API key yet")
-                .font(.subheadline)
-        }
-
-        SecureField("Paste Anthropic API key (sk-ant-…)", text: $apiKeyDraft)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-
-        Button("Save Key") {
-            let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            KeychainStore.save(trimmed)
-            apiKeyDraft = ""
-            hasStoredKey = true
-            showSavedConfirmation = true
-        }
-        .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-        if hasStoredKey {
-            Button("Remove Key", role: .destructive) {
-                KeychainStore.delete()
-                hasStoredKey = false
-            }
-        }
-
-        Link(destination: URL(string: "https://console.anthropic.com/")!) {
-            Label("Get an API key (console.anthropic.com)", systemImage: "arrow.up.right.square")
-        }
-    }
-
 
     // MARK: - Storm data
 
@@ -177,9 +96,7 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: appVersion)
-            LabeledContent("AI Backend", value: assistantMode == .archie
-                           ? "Archie CRM (managed)"
-                           : AppSettings.model(from: modelOverride))
+            LabeledContent("AI Backend", value: "Archie CRM (managed)")
             Link(destination: URL(string: "https://www.spc.noaa.gov/climo/reports/")!) {
                 Label("NOAA SPC Storm Reports", systemImage: "cloud.bolt.rain")
             }
