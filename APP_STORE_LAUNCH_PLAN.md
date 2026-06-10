@@ -15,22 +15,20 @@
 - **Monetization:** 5 in-app purchases (3 consumable credit packs + 2 auto-renewable subscriptions). The app also sells the same credits via Stripe on the web at a 10% discount — that path is independent of this launch.
 - **Apple Developer account:** James already has one. The Claude agent CANNOT log in alone — Apple uses 2FA. James must be present for every App Store Connect session.
 
-### Inputs the executor must get from James before starting
-| Input | Why needed |
+### Inputs — ALL RESOLVED 2026-06-10 except 2FA
+| Input | Value |
 |---|---|
-| Privacy Policy URL | Paywall link (required, Guideline 3.1.2) + App Store metadata |
-| Terms of Use / EULA URL | Paywall link (required for subscriptions) |
-| Support URL | App Store metadata |
-| Demo account email + password | App Review (app is login-gated) — must be a working account with ≥1 credit |
-| 2FA codes during ASC sessions | Apple sign-in |
-
-If privacy/terms pages don't exist yet, create simple pages on one of James's sites first (a `/privacy` and `/terms` page is sufficient).
+| Privacy Policy URL | `https://app.archie.now/privacy.html` (live) |
+| Terms of Use / EULA URL | `https://app.archie.now/terms.html` (live) |
+| Support URL | `https://app.archie.now/support.html` (live) |
+| Demo account | `james+appreview@bestroofingnow.com` / `ArchieReview#2026` — 25 credits loaded, login verified |
+| 2FA codes during ASC sessions | Still James, in person |
 
 ---
 
-## Phase 1 — Code fixes (BLOCKERS: each is a known App Review rejection)
+## Phase 1 — Code fixes ✅ ALL DONE 2026-06-10 (skip to Phase 2)
 
-Do these in the repos before submitting. Build + run tests after each (`xcodebuild -project ArchieClaims.xcodeproj -scheme ArchieClaims` … test on iPhone simulator).
+All four fixes are implemented, built, tested, and pushed (iOS `Archie-Claims@5234357`, backend `roof-report-ai@eb69885`). Kept below for reference. Demo/legal inputs are also done: privacy/terms/support pages live at `https://app.archie.now/privacy.html` / `terms.html` / `support.html`; App Review demo account `james+appreview@bestroofingnow.com` / `ArchieReview#2026` with 25 credits.
 
 ### 1.1 Restore Purchases button — `ArchieClaims/Views/CreditStoreView.swift`
 - Add a visible "Restore Purchases" button to the credit store / paywall.
