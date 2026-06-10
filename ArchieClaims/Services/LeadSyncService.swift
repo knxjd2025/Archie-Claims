@@ -214,6 +214,7 @@ final class LeadSyncService: ObservableObject {
         if !address.isEmpty, address != "Locating address…" { d["address"] = address }
         if !lead.homeownerName.isEmpty { d["homeowner_name"] = lead.homeownerName }
         if !lead.phone.isEmpty { d["phone"] = lead.phone }
+        if !lead.email.isEmpty { d["email"] = lead.email }
         if !lead.notes.isEmpty { d["notes"] = lead.notes }
         if !lead.stormSummary.isEmpty { d["storm_summary"] = lead.stormSummary }
         return d

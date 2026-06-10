@@ -21,6 +21,17 @@ struct PropertySheetView: View {
     @State private var alerts: [NWSAlert] = []
     @State private var safariURL: IdentifiableURL?
 
+    // Manual contact entry (pre-filled from an existing lead).
+    @State private var homeownerName = ""
+    @State private var phone = ""
+    @State private var email = ""
+    @State private var contactNotes = ""
+    @State private var prefilled = false
+
+    // Free property characteristics (auto-filled from OpenStreetMap).
+    @State private var property: PropertyDataService.PropertyInfo?
+    @State private var loadingProperty = true
+
     enum LoadState {
         case loading
         case loaded
@@ -40,8 +51,9 @@ struct PropertySheetView: View {
             List {
                 addressSection
                 logDoorSection
+                homeownerSection
                 stormSection
-                contactSection
+                ownerLookupSection
                 actionSection
             }
             .listStyle(.insetGrouped)
@@ -52,10 +64,12 @@ struct PropertySheetView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .onAppear(perform: prefillFromExistingLead)
             .task {
                 async let geo: Void = loadGeocode()
                 async let storms: Void = loadStorms()
-                _ = await (geo, storms)
+                async let prop: Void = loadProperty()
+                _ = await (geo, storms, prop)
             }
             .sheet(item: $safariURL) { item in
                 SafariView(url: item.url)
@@ -89,11 +103,45 @@ struct PropertySheetView: View {
                 }
             }
 
+            if loadingProperty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking up property details…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let summary = property?.summary {
+                Label(summary, systemImage: "building.2")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Button {
                 openInMaps()
             } label: {
                 Label("Open in Apple Maps", systemImage: "map")
             }
+        }
+    }
+
+    private var homeownerSection: some View {
+        Section {
+            TextField("Homeowner name", text: $homeownerName)
+                .textContentType(.name)
+            TextField("Phone", text: $phone)
+                .keyboardType(.phonePad)
+                .textContentType(.telephoneNumber)
+            TextField("Email", text: $email)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.emailAddress)
+            TextField("Notes (damage seen, callbacks…)", text: $contactNotes, axis: .vertical)
+                .lineLimit(2...5)
+        } header: {
+            Text("Homeowner")
+        } footer: {
+            Text("Type what you learn at the door. Saved with the lead and synced to your Archie CRM.")
         }
     }
 
@@ -149,7 +197,7 @@ struct PropertySheetView: View {
         }
     }
 
-    private var contactSection: some View {
+    private var ownerLookupSection: some View {
         Section {
             ForEach(publicLinks) { link in
                 Button {
@@ -278,34 +326,79 @@ struct PropertySheetView: View {
         stormLoadState = .loaded
     }
 
+    // MARK: - Loading & persistence
+
+    private func loadProperty() async {
+        loadingProperty = true
+        property = await PropertyDataService.lookup(coordinate)
+        // Carry auto-filled details onto an already-saved lead.
+        if let info = property, var lead = existingLead {
+            applyProperty(info, to: &lead)
+            leadStore.update(lead)
+        }
+        loadingProperty = false
+    }
+
+    private func prefillFromExistingLead() {
+        guard !prefilled else { return }
+        prefilled = true
+        if let lead = existingLead {
+            homeownerName = lead.homeownerName
+            phone = lead.phone
+            email = lead.email
+            contactNotes = lead.notes
+        }
+    }
+
+    private func applyContact(to lead: inout Lead) {
+        lead.homeownerName = homeownerName.trimmingCharacters(in: .whitespaces)
+        lead.phone = phone.trimmingCharacters(in: .whitespaces)
+        lead.email = email.trimmingCharacters(in: .whitespaces)
+        lead.notes = contactNotes
+    }
+
+    private func applyProperty(_ info: PropertyDataService.PropertyInfo, to lead: inout Lead) {
+        lead.propertyType = info.propertyType
+        lead.stories = info.stories
+        lead.roofShape = info.roofShape
+    }
+
+    private func newLead(status: Lead.Status, knockedNow: Bool) -> Lead {
+        var lead = Lead(
+            status: status,
+            address: addressLine,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            stormSummary: stormSummary,
+            lastKnockAt: knockedNow ? Date() : nil
+        )
+        applyContact(to: &lead)
+        if let info = property { applyProperty(info, to: &lead) }
+        return lead
+    }
+
     private func saveLead() {
         if var lead = existingLead {
             lead.stormSummary = stormSummary
+            applyContact(to: &lead)
+            if let info = property { applyProperty(info, to: &lead) }
             leadStore.update(lead)
         } else {
-            leadStore.add(Lead(
-                address: addressLine,
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude,
-                stormSummary: stormSummary
-            ))
+            leadStore.add(newLead(status: .newLead, knockedNow: false))
         }
     }
 
     /// Logs a door outcome from the evidence view — creates or updates the lead
-    /// and stamps the knock so it counts toward today's tally.
+    /// (carrying any typed contact + auto-filled property data) and stamps the
+    /// knock so it counts toward today's tally.
     private func logDoor(_ status: Lead.Status) {
-        if let lead = existingLead {
+        if var lead = existingLead {
+            applyContact(to: &lead)
+            if let info = property { applyProperty(info, to: &lead) }
+            leadStore.update(lead)
             leadStore.setStatus(status, for: lead)
         } else {
-            leadStore.add(Lead(
-                status: status,
-                address: addressLine,
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude,
-                stormSummary: stormSummary,
-                lastKnockAt: Date()
-            ))
+            leadStore.add(newLead(status: status, knockedNow: true))
         }
     }
 }

@@ -85,6 +85,13 @@ struct Lead: Identifiable, Codable, Hashable {
     var notes: String
     /// Snapshot of the best nearby storm evidence at the time the lead was saved.
     var stormSummary: String
+    /// Homeowner email (manual entry or paid owner report). Optional default so
+    /// older saved leads migrate cleanly.
+    var email: String = ""
+    /// Free property characteristics auto-filled from OpenStreetMap.
+    var propertyType: String? = nil
+    var stories: Int? = nil
+    var roofShape: String? = nil
     /// When a door was actually knocked (created or status changed) — drives the
     /// "today" tally so editing notes on an old lead doesn't inflate door counts.
     /// Optional for migration: leads saved before this field decode to nil and

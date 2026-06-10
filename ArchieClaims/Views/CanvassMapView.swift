@@ -51,6 +51,10 @@ struct CanvassMapView: View {
     @State private var quickLogSpot: TappedSpot?
     @State private var statusFilter: Lead.Status?
 
+    /// When on, the map re-centers on the canvasser as they walk. Auto-disables
+    /// if the user pans the map away themselves.
+    @State private var followMe = false
+
     @AppStorage(AppSettings.onboardingDoneKey) private var onboardingDone = false
 
     struct TappedSpot: Identifiable {
@@ -115,6 +119,24 @@ struct CanvassMapView: View {
                     visibleRegion = context.region
                     Self.persistCamera(context.region)
                     scheduleStormOverlayRefresh(for: context.region)
+                    // If the map drifts away from the user while following, they
+                    // panned it themselves — stop following so we don't fight them.
+                    if followMe, let here = locationManager.lastLocation {
+                        let dLat = abs(context.region.center.latitude - here.coordinate.latitude)
+                        let dLon = abs(context.region.center.longitude - here.coordinate.longitude)
+                        if dLat > context.region.span.latitudeDelta * 0.5
+                            || dLon > context.region.span.longitudeDelta * 0.5 {
+                            followMe = false
+                        }
+                    }
+                }
+                .onChange(of: locationManager.lastLocation?.timestamp) {
+                    guard followMe, let here = locationManager.lastLocation else { return }
+                    let span = visibleRegion?.span
+                        ?? MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        cameraPosition = .region(MKCoordinateRegion(center: here.coordinate, span: span))
+                    }
                 }
                 .onTapGesture { screenPoint in
                     guard let coordinate = proxy.convert(screenPoint, from: .local) else { return }
@@ -588,14 +610,13 @@ struct CanvassMapView: View {
     private var zoomControls: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.6)) {
-                    cameraPosition = .userLocation(fallback: .automatic)
-                }
+                toggleFollowMe()
             } label: {
-                Image(systemName: "location.fill")
+                Image(systemName: followMe ? "location.fill" : "location")
                     .frame(width: 40, height: 40)
+                    .foregroundStyle(followMe ? Color.accentColor : .primary)
             }
-            .accessibilityLabel("Go to my location")
+            .accessibilityLabel(followMe ? "Following your location — tap to stop" : "Follow my location while canvassing")
             Divider().frame(width: 40)
             Button { zoom(by: 0.45) } label: {
                 Image(systemName: "plus")
@@ -615,6 +636,27 @@ struct CanvassMapView: View {
         .padding(.trailing, 10)
         .padding(.bottom, 90)
         .accessibilityElement(children: .contain)
+    }
+
+    private func toggleFollowMe() {
+        followMe.toggle()
+        guard followMe else { return }
+        locationManager.start()
+        let span = visibleRegion.map { region -> MKCoordinateSpan in
+            // Snap to a street-level zoom the first time you start following.
+            min(region.span.latitudeDelta, region.span.longitudeDelta) > 0.02
+                ? MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)
+                : region.span
+        } ?? MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)
+        if let here = locationManager.lastLocation {
+            withAnimation(.easeOut(duration: 0.5)) {
+                cameraPosition = .region(MKCoordinateRegion(center: here.coordinate, span: span))
+            }
+        } else {
+            withAnimation(.easeOut(duration: 0.5)) {
+                cameraPosition = .userLocation(fallback: .automatic)
+            }
+        }
     }
 
     private func zoom(by factor: Double) {

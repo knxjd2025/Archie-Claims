@@ -28,6 +28,11 @@ struct LeadDetailView: View {
                 Text(lead.address)
                     .font(.subheadline)
                     .textSelection(.enabled)
+                if let summary = propertySummary {
+                    Label(summary, systemImage: "building.2")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if !lead.stormSummary.isEmpty {
                     Text(lead.stormSummary)
                         .font(.caption)
@@ -41,6 +46,11 @@ struct LeadDetailView: View {
                 TextField("Phone", text: $lead.phone)
                     .keyboardType(.phonePad)
                     .textContentType(.telephoneNumber)
+                TextField("Email", text: $lead.email)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.emailAddress)
             }
 
             Section("Notes") {
@@ -138,6 +148,14 @@ struct LeadDetailView: View {
 
     private var sanitizedPhone: String {
         lead.phone.filter { $0.isNumber || $0 == "+" }
+    }
+
+    private var propertySummary: String? {
+        var parts: [String] = []
+        if let t = lead.propertyType { parts.append(t.capitalized) }
+        if let s = lead.stories { parts.append("\(s) stor\(s == 1 ? "y" : "ies")") }
+        if let r = lead.roofShape { parts.append("\(r) roof") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
     private var assistantContext: String {

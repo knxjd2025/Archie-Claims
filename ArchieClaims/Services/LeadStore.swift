@@ -39,9 +39,13 @@ final class LeadStore: ObservableObject {
         updated.status = lead.status
         updated.homeownerName = lead.homeownerName
         updated.phone = lead.phone
+        updated.email = lead.email
         updated.notes = lead.notes
         updated.address = lead.address
         updated.stormSummary = lead.stormSummary
+        updated.propertyType = lead.propertyType
+        updated.stories = lead.stories
+        updated.roofShape = lead.roofShape
         updated.lastKnockAt = lead.lastKnockAt
         updated.updatedAt = Date()
         markDirty(&updated)
