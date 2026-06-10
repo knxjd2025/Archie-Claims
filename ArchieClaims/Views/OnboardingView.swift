@@ -1,10 +1,13 @@
 import SwiftUI
 
-/// First-run walkthrough: what the app does, where the data comes from, and
-/// (optionally) setting up the AI key.
+/// First-run walkthrough: what the app does, where the data comes from, how to
+/// log doors fast, and a primed location-permission ask on the final page.
 struct OnboardingView: View {
     @Binding var done: Bool
+    @EnvironmentObject private var locationManager: LocationManager
     @State private var page = 0
+
+    private let lastPage = 3
 
     var body: some View {
         VStack {
@@ -17,9 +20,9 @@ struct OnboardingView: View {
                 .tag(0)
 
                 OnboardPage(
-                    symbol: "cloud.bolt.rain.fill",
-                    title: "Real Storm Evidence",
-                    text: "Data comes straight from NOAA's Storm Prediction Center and the National Weather Service — free, official, and updated daily. Reports are preliminary; always verify on the roof."
+                    symbol: "bolt.fill",
+                    title: "Log Doors in One Tap",
+                    text: "Turn on ⚡️ Quick Log, then every roof you tap logs the knock — Not Home, Interested, Appointment, Signed — in a single tap. The address and storm evidence fill in automatically while you walk to the next door."
                 )
                 .tag(1)
 
@@ -29,19 +32,28 @@ struct OnboardingView: View {
                     text: "Door scripts, damage photo checklists, claim explanations, follow-up texts — powered by Archie. Sign in or create a free account (same login as app.archie.now) to turn it on."
                 )
                 .tag(2)
+
+                OnboardPage(
+                    symbol: "location.fill.viewfinder",
+                    title: "Find Your Turf",
+                    text: "Archie centers the map on the neighborhood you're standing in so you start canvassing immediately. Your location stays on this phone — it's never uploaded or shared."
+                )
+                .tag(3)
             }
             .tabViewStyle(.page)
             .indexViewStyle(.page(backgroundDisplayMode: .always))
 
             VStack(spacing: 10) {
                 Button {
-                    if page < 2 {
+                    if page < lastPage {
                         withAnimation { page += 1 }
                     } else {
+                        // Prime, then fire the system location prompt on tap.
+                        locationManager.requestPermission()
                         done = true
                     }
                 } label: {
-                    Text(page < 2 ? "Next" : "Start Canvassing")
+                    Text(buttonTitle)
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -55,6 +67,14 @@ struct OnboardingView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
+        }
+    }
+
+    private var buttonTitle: String {
+        switch page {
+        case lastPage: return "Find My Turf"
+        case lastPage - 1: return "Next"
+        default: return "Next"
         }
     }
 }

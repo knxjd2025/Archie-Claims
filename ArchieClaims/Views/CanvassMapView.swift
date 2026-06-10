@@ -51,6 +51,8 @@ struct CanvassMapView: View {
     @State private var quickLogSpot: TappedSpot?
     @State private var statusFilter: Lead.Status?
 
+    @AppStorage(AppSettings.onboardingDoneKey) private var onboardingDone = false
+
     struct TappedSpot: Identifiable {
         let id = UUID()
         let coordinate: CLLocationCoordinate2D
@@ -217,10 +219,15 @@ struct CanvassMapView: View {
                 Text("Address and storm evidence are saved automatically.")
             }
             .onAppear {
-                if locationManager.authorization == .notDetermined {
-                    locationManager.requestPermission()
-                } else {
+                switch locationManager.authorization {
+                case .authorizedWhenInUse, .authorizedAlways:
                     locationManager.start()
+                case .notDetermined where onboardingDone:
+                    // Onboarding primes + asks for new users; this only covers
+                    // someone who finished onboarding on an older build.
+                    locationManager.requestPermission()
+                default:
+                    break
                 }
             }
         }
