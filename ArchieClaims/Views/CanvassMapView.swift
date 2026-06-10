@@ -46,6 +46,8 @@ struct CanvassMapView: View {
     @State private var stormMarkers: [NearbyStormReport] = []
     @State private var stormOverlayTask: Task<Void, Never>?
     @State private var isLoadingStorms = false
+    @State private var stormFilter = StormFilter()
+    @State private var showStormFilter = false
 
     @State private var quickLogMode = false
     @State private var quickLogSpot: TappedSpot?
@@ -169,6 +171,17 @@ struct CanvassMapView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        showStormFilter = true
+                    } label: {
+                        Image(systemName: stormFilter.isActive
+                              ? "line.3.horizontal.decrease.circle.fill"
+                              : "line.3.horizontal.decrease.circle")
+                    }
+                    .accessibilityLabel("Filter storms")
+                    .disabled(!showStormOverlay)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         useHybrid.toggle()
                     } label: {
                         Image(systemName: useHybrid ? "map" : "globe.americas.fill")
@@ -219,6 +232,13 @@ struct CanvassMapView: View {
                 PropertySheetView(coordinate: spot.coordinate)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showStormFilter) {
+                StormFilterSheet(filter: $stormFilter)
+                    .presentationDetents([.medium, .large])
+            }
+            .onChange(of: stormFilter) {
+                if let region = visibleRegion { scheduleStormOverlayRefresh(for: region) }
             }
             .confirmationDialog(
                 "Log this door",
@@ -424,7 +444,7 @@ struct CanvassMapView: View {
                 lookbackDays: lookbackDays
             )
             guard !Task.isCancelled else { return }
-            stormMarkers = Array(reports.prefix(80))
+            stormMarkers = Array(reports.filter { stormFilter.matches($0.report) }.prefix(80))
             isLoadingStorms = false
         }
     }

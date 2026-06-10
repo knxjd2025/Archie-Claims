@@ -188,6 +188,14 @@ struct PropertySheetView: View {
                     ForEach(nearbyReports.prefix(12)) { item in
                         StormReportRow(item: item)
                     }
+                    if nearbyReports.count > 12 {
+                        NavigationLink {
+                            StormHistoryView(reports: nearbyReports)
+                        } label: {
+                            Label("See all \(nearbyReports.count) storm reports", systemImage: "list.bullet")
+                                .font(.subheadline.weight(.medium))
+                        }
+                    }
                 }
             }
         } header: {

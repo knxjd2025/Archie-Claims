@@ -102,6 +102,36 @@ extension StormReport.Kind {
     }
 }
 
+/// Client-side filter for storm reports — by kind, minimum hail size, and a
+/// date window. Used by both the map overlay and the per-house history list so
+/// a canvasser can focus on "the May 14 hail" or "only 1.5-inch-plus hail."
+struct StormFilter: Equatable {
+    var kinds: Set<StormReport.Kind> = [.hail, .wind, .tornado]
+    var minHailInches: Double = 0
+    var fromDate: Date?
+    var toDate: Date?
+
+    var isActive: Bool {
+        kinds.count < StormReport.Kind.allCases.count
+            || minHailInches > 0 || fromDate != nil || toDate != nil
+    }
+
+    func matches(_ report: StormReport) -> Bool {
+        guard kinds.contains(report.kind) else { return false }
+        if report.kind == .hail, minHailInches > 0 {
+            guard let size = report.hailSizeInches, size >= minHailInches else { return false }
+        }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .current
+        if let from = fromDate, report.dateUTC < cal.startOfDay(for: from) { return false }
+        if let to = toDate {
+            let endOfTo = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: to)) ?? to
+            if report.dateUTC >= endOfTo { return false }
+        }
+        return true
+    }
+}
+
 /// A storm report paired with its distance from a property of interest.
 struct NearbyStormReport: Identifiable, Hashable {
     var id: String { report.id }
