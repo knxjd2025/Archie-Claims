@@ -13,7 +13,7 @@ final class StoreManager: ObservableObject {
     @Published var lastError: String?
 
     enum PurchaseOutcome {
-        case success(transactionID: String, productID: String)
+        case success(transactionID: String, productID: String, jws: String)
         case cancelled
         case pending
     }
@@ -53,11 +53,13 @@ final class StoreManager: ObservableObject {
         let result = try await product.purchase()
         switch result {
         case .success(let verification):
+            // The full signed JWS — the backend verifies this against Apple.
+            let jws = verification.jwsRepresentation
             switch verification {
             case .verified(let transaction):
                 let id = String(transaction.id)
                 await transaction.finish()
-                return .success(transactionID: id, productID: product.id)
+                return .success(transactionID: id, productID: product.id, jws: jws)
             case .unverified:
                 throw StoreError.unverified
             }

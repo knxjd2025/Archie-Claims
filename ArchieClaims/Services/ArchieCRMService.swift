@@ -190,12 +190,13 @@ extension ArchieBackendService {
     }
 
     /// `POST /api/property/credits/iap` — redeem an Apple StoreKit purchase.
-    /// Returns the new credit balance.
+    /// Sends the signed JWS so the backend can verify it with Apple. Returns the
+    /// new credit balance.
     @discardableResult
-    func redeemIAP(productID: String, transactionID: String) async throws -> Int {
+    func redeemIAP(productID: String, transactionID: String, jws: String) async throws -> Int {
         let result = try await authorizedJSON(
             path: "api/property/credits/iap", method: "POST",
-            body: ["product_id": productID, "transaction_id": transactionID]
+            body: ["product_id": productID, "transaction_id": transactionID, "jws": jws]
         )
         return (result as? [String: Any])?["balance"] as? Int ?? 0
     }

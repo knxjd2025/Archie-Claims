@@ -123,9 +123,9 @@ struct CreditStoreView: View {
             do {
                 let outcome = try await store.purchase(product)
                 switch outcome {
-                case .success(let txID, let productID):
+                case .success(let txID, let productID, let jws):
                     working = true
-                    let newBalance = try await service.redeemIAP(productID: productID, transactionID: txID)
+                    let newBalance = try await service.redeemIAP(productID: productID, transactionID: txID, jws: jws)
                     balance = newBalance
                     onPurchased?(newBalance)
                     message = "Credits added. You now have \(newBalance)."
