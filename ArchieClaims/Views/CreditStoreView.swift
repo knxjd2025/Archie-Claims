@@ -13,7 +13,7 @@ struct CreditStoreView: View {
     /// Called after a successful Apple purchase so the caller can refresh balance.
     var onPurchased: ((Int) -> Void)?
 
-    @StateObject private var store = StoreManager()
+    @EnvironmentObject private var store: StoreManager
     @State private var balance: Int = 0
     @State private var message: String?
     @State private var working = false
@@ -69,6 +69,10 @@ struct CreditStoreView: View {
             }
             .task {
                 balance = info?.balance ?? 0
+                store.onBalanceUpdate = { newBalance in
+                    balance = newBalance
+                    onPurchased?(newBalance)
+                }
                 await store.loadProducts(ids: (info?.items ?? []).map(\.appleProductID))
             }
         }
@@ -121,22 +125,18 @@ struct CreditStoreView: View {
         message = nil
         Task {
             do {
+                // StoreManager redeems with the backend BEFORE finishing the
+                // transaction, and updates `balance` via onBalanceUpdate.
                 let outcome = try await store.purchase(product)
                 switch outcome {
-                case .success(let txID, let productID, let jws):
-                    working = true
-                    let newBalance = try await service.redeemIAP(productID: productID, transactionID: txID, jws: jws)
-                    balance = newBalance
-                    onPurchased?(newBalance)
+                case .success(let newBalance):
                     message = "Credits added. You now have \(newBalance)."
-                    working = false
                 case .pending:
                     message = "Your purchase is pending approval. Credits will appear once it's approved."
                 case .cancelled:
                     break
                 }
             } catch {
-                working = false
                 message = error.localizedDescription
             }
         }

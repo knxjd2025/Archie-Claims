@@ -6,6 +6,7 @@ struct ArchieClaimsApp: App {
     @StateObject private var leadStore: LeadStore
     @StateObject private var locationManager = LocationManager()
     @StateObject private var syncService: LeadSyncService
+    @StateObject private var storeManager = StoreManager()
 
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
@@ -23,15 +24,24 @@ struct ArchieClaimsApp: App {
                 .environmentObject(leadStore)
                 .environmentObject(locationManager)
                 .environmentObject(syncService)
+                .environmentObject(storeManager)
                 .task {
                     syncService.updateBaseURL(archieBaseURL)
                     syncService.start()
+                    // Redeem any purchase/renewal left unfinished (e.g. the app
+                    // was killed mid-redeem, or a subscription renewed while closed).
+                    storeManager.configure(baseURLOverride: archieBaseURL)
+                    storeManager.startListening()
                 }
                 .onChange(of: archieBaseURL) {
                     syncService.updateBaseURL(archieBaseURL)
+                    storeManager.configure(baseURLOverride: archieBaseURL)
                 }
                 .onChange(of: scenePhase) {
-                    if scenePhase == .active { syncService.requestSync() }
+                    if scenePhase == .active {
+                        syncService.requestSync()
+                        Task { await storeManager.redeemPending() }
+                    }
                 }
         }
     }
