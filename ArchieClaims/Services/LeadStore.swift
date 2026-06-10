@@ -9,6 +9,11 @@ final class LeadStore: ObservableObject {
     /// silently loses a day of knocks to a full disk or encoding error.
     @Published var lastSaveError: String?
 
+    /// Called after any user-facing change to a lead (create / disposition /
+    /// edit / delete) so the sync service can schedule a debounced push. NOT
+    /// fired by the sync write-back methods, which would loop.
+    var onLeadsChanged: (() -> Void)?
+
     private let fileURL: URL
 
     init(filename: String = "leads.json") {
@@ -22,14 +27,17 @@ final class LeadStore: ObservableObject {
     func add(_ lead: Lead) {
         leads.insert(lead, at: 0)
         save()
+        onLeadsChanged?()
     }
 
     func update(_ lead: Lead) {
         guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
         var updated = lead
         updated.updatedAt = Date()
+        markDirty(&updated)
         leads[index] = updated
         save()
+        onLeadsChanged?()
     }
 
     /// Records a knock outcome: updates the status and stamps `lastKnockAt` so
@@ -41,7 +49,9 @@ final class LeadStore: ObservableObject {
         leads[index].status = status
         leads[index].lastKnockAt = now
         leads[index].updatedAt = now
+        markDirty(&leads[index])
         save()
+        onLeadsChanged?()
     }
 
     func delete(_ lead: Lead) {
@@ -59,6 +69,74 @@ final class LeadStore: ObservableObject {
         leads.first {
             abs($0.latitude - latitude) < toleranceDegrees && abs($0.longitude - longitude) < toleranceDegrees
         }
+    }
+
+    /// A content edit re-queues a previously-synced lead so the CRM stays in
+    /// step. Leaves leads that already need sync untouched, and never moves a
+    /// lead out of an in-flight state here.
+    private func markDirty(_ lead: inout Lead) {
+        if lead.effectiveSyncState == .synced || lead.effectiveSyncState == .syncing {
+            lead.syncState = .queued
+        }
+    }
+
+    // MARK: - CRM sync state (driven by LeadSyncService; no onLeadsChanged)
+
+    var pendingSyncCount: Int { leads.filter(\.needsSync).count }
+
+    func leadsPendingSync(limit: Int) -> [Lead] {
+        Array(leads.filter(\.needsSync).prefix(limit))
+    }
+
+    /// Marks the given leads in-flight just before a request goes out.
+    func markSyncing(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let now = Date()
+        for i in leads.indices where ids.contains(leads[i].id) {
+            leads[i].syncState = .syncing
+            leads[i].lastSyncAttempt = now
+        }
+        save()
+    }
+
+    struct SyncUpdate {
+        let id: UUID
+        let ok: Bool
+        let crmLeadID: String?
+        let knockID: String?
+        let error: String?
+    }
+
+    /// Applies per-item results from the sync endpoint. If a lead was edited
+    /// while its request was in flight (state bumped back to `.queued`), a
+    /// success is NOT finalized to `.synced` — it stays queued to re-send the
+    /// newer content — but the returned CRM ids are still recorded.
+    func applySyncResults(_ updates: [SyncUpdate]) {
+        guard !updates.isEmpty else { return }
+        for update in updates {
+            guard let i = leads.firstIndex(where: { $0.id == update.id }) else { continue }
+            if let crmLeadID = update.crmLeadID { leads[i].syncedCRMLeadID = crmLeadID }
+            if let knockID = update.knockID { leads[i].syncedKnockID = knockID }
+            if update.ok {
+                leads[i].syncState = (leads[i].syncState == .syncing) ? .synced : .queued
+                leads[i].syncError = nil
+            } else {
+                leads[i].syncState = .failed
+                leads[i].syncError = update.error
+            }
+        }
+        save()
+    }
+
+    /// Reverts in-flight leads to `.failed` when a whole request fails (network,
+    /// 429, session) so the next trigger retries them.
+    func markSyncFailed(_ ids: Set<UUID>, error: String) {
+        guard !ids.isEmpty else { return }
+        for i in leads.indices where ids.contains(leads[i].id) && leads[i].syncState == .syncing {
+            leads[i].syncState = .failed
+            leads[i].syncError = error
+        }
+        save()
     }
 
     // MARK: - Persistence

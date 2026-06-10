@@ -3,6 +3,7 @@ import SwiftUI
 /// Saved doors, filterable by status.
 struct LeadsView: View {
     @EnvironmentObject private var leadStore: LeadStore
+    @EnvironmentObject private var syncService: LeadSyncService
     @State private var filter: Lead.Status?
     @State private var searchText = ""
 
@@ -46,6 +47,11 @@ struct LeadsView: View {
                     LeadDetailView(lead: lead)
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if !leadStore.leads.isEmpty {
+                    syncBar
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -59,6 +65,32 @@ struct LeadsView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var syncBar: some View {
+        let pending = syncService.pendingCount
+        HStack(spacing: 8) {
+            if syncService.isSyncing {
+                ProgressView().controlSize(.small)
+                Text("Syncing to Archie CRM…").font(.caption)
+            } else if pending > 0 {
+                Image(systemName: "arrow.up.circle").foregroundStyle(Color.accentColor)
+                Text("\(pending) lead\(pending == 1 ? "" : "s") to sync").font(.caption)
+            } else {
+                Image(systemName: "checkmark.icloud").foregroundStyle(.green)
+                Text("All leads synced to Archie CRM").font(.caption)
+            }
+            Spacer()
+            if pending > 0 && !syncService.isSyncing {
+                Button("Push \(pending)") { syncService.pushNow() }
+                    .font(.caption.weight(.semibold))
+                    .disabled(ArchieBackendService.signedInEmail == nil)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 }
 
@@ -81,9 +113,36 @@ struct LeadRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(lead.updatedAt, style: .date)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(lead.updatedAt, style: .date)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                syncBadge
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var syncBadge: some View {
+        switch lead.effectiveSyncState {
+        case .synced:
+            Image(systemName: "checkmark.icloud.fill")
+                .font(.caption2)
+                .foregroundStyle(.green)
+                .accessibilityLabel("Synced to CRM")
+        case .syncing:
+            Image(systemName: "arrow.triangle.2.circlepath.icloud")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        case .failed:
+            Image(systemName: "exclamationmark.icloud")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        case .local, .queued:
+            Image(systemName: "icloud.and.arrow.up")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .accessibilityLabel("Not yet synced")
         }
     }
 }

@@ -39,6 +39,38 @@ struct Lead: Identifiable, Codable, Hashable {
             case .notInterested: return .red
             }
         }
+
+        /// Wire value sent to the CRM sync endpoint (matches the server's
+        /// canvass-status-map: 'new', 'not_home', 'interested', …).
+        var wireValue: String {
+            switch self {
+            case .newLead: return "new"
+            case .notHome: return "not_home"
+            case .interested: return "interested"
+            case .appointment: return "appointment"
+            case .inspected: return "inspected"
+            case .signed: return "signed"
+            case .notInterested: return "not_interested"
+            }
+        }
+
+        /// Statuses that become a CRM pipeline lead (vs. a door-knock only).
+        var isQualifiedLead: Bool {
+            switch self {
+            case .interested, .appointment, .inspected, .signed: return true
+            case .newLead, .notHome, .notInterested: return false
+            }
+        }
+    }
+
+    /// CRM sync lifecycle for a lead. Optional on the model so leads saved before
+    /// sync existed decode to nil (treated as `.local`, i.e. needs sending).
+    enum SyncState: String, Codable {
+        case local      // created on device, never sent
+        case queued     // edited since last sync, waiting to send
+        case syncing    // request in flight
+        case synced     // the CRM acknowledged this door
+        case failed     // last attempt errored; will retry
     }
 
     var id: UUID
@@ -61,6 +93,34 @@ struct Lead: Identifiable, Codable, Hashable {
 
     /// The timestamp that counts as a knock for tallies.
     var knockedAt: Date { lastKnockAt ?? updatedAt }
+
+    // MARK: - CRM sync (managed by LeadSyncService; all optional for migration)
+
+    /// Current sync lifecycle state (nil = never synced → treated as `.local`).
+    var syncState: SyncState? = nil
+    /// The CRM `leads.id` once this door became a qualified lead.
+    var syncedCRMLeadID: String? = nil
+    /// The CRM `door_knocks.id` for this door.
+    var syncedKnockID: String? = nil
+    var lastSyncAttempt: Date? = nil
+    /// Last per-item error string from the server (when `.failed`).
+    var syncError: String? = nil
+
+    var effectiveSyncState: SyncState { syncState ?? .local }
+
+    /// True when this door still needs to be pushed to the CRM.
+    var needsSync: Bool {
+        switch effectiveSyncState {
+        case .synced, .syncing: return false
+        case .local, .queued, .failed: return true
+        }
+    }
+
+    /// Deep link to this lead in the web CRM, once it has a CRM id.
+    var crmURL: URL? {
+        guard let id = syncedCRMLeadID else { return nil }
+        return URL(string: "https://app.archie.now/leads/\(id)")
+    }
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)

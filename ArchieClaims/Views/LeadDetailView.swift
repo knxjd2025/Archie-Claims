@@ -4,10 +4,14 @@ import SwiftUI
 struct LeadDetailView: View {
     @EnvironmentObject private var leadStore: LeadStore
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var syncService: LeadSyncService
     @Environment(\.dismiss) private var dismiss
 
     @State var lead: Lead
     @State private var confirmDelete = false
+
+    /// Live copy from the store so the sync badge updates after a push.
+    private var current: Lead { leadStore.leads.first(where: { $0.id == lead.id }) ?? lead }
 
     var body: some View {
         Form {
@@ -66,6 +70,8 @@ struct LeadDetailView: View {
                 }
             }
 
+            crmSyncSection
+
             Section {
                 Button(role: .destructive) {
                     confirmDelete = true
@@ -88,6 +94,45 @@ struct LeadDetailView: View {
                 leadStore.delete(lead)
                 dismiss()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var crmSyncSection: some View {
+        Section {
+            switch current.effectiveSyncState {
+            case .synced:
+                Label("Synced to Archie CRM", systemImage: "checkmark.icloud.fill")
+                    .foregroundStyle(.green)
+                if let url = current.crmURL {
+                    Link(destination: url) {
+                        Label("View in Archie CRM", systemImage: "arrow.up.right.square")
+                    }
+                }
+            case .syncing:
+                Label("Syncing to Archie CRM…", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.secondary)
+            case .failed, .local, .queued:
+                if ArchieBackendService.signedInEmail == nil {
+                    Label("Sign in to Archie to sync this lead", systemImage: "icloud.slash")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button {
+                        syncService.pushNow()
+                    } label: {
+                        Label("Send to Archie CRM", systemImage: "icloud.and.arrow.up")
+                    }
+                    if current.effectiveSyncState == .failed, let err = current.syncError {
+                        Text("Last attempt: \(err)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("CRM Sync")
+        } footer: {
+            Text("Qualified doors (Interested, Appointment, Inspected, Signed) become leads in your Archie CRM pipeline. Every door is logged as a knock.")
         }
     }
 

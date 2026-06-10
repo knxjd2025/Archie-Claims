@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var syncService: LeadSyncService
     @AppStorage(AppSettings.searchRadiusKey) private var radiusMiles = AppSettings.defaultRadiusMiles
     @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
     @AppStorage(AppSettings.modelOverrideKey) private var modelOverride = ""
@@ -98,6 +99,8 @@ struct SettingsView: View {
         } else {
             ArchieAccountForm { email in
                 signedInEmail = email
+                // Drain any leads queued while signed out.
+                syncService.requestSync()
             }
         }
     }
