@@ -471,7 +471,7 @@ struct PropertySheetView: View {
     }
 
     private var shareText: String {
-        "Storm report for \(addressLine)\n\(stormSummary)\n\nGenerated with Archie Claims (data: NOAA SPC/NWS, preliminary)."
+        "Storm report for \(addressLine)\n\(stormSummary)\n\nGenerated with Archie Canvass (data: NOAA SPC/NWS, preliminary)."
     }
 
     private func loadGeocode() async {

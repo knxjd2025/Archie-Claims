@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Archie Claims</string>
+	<string>Archie Canvass</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Archie Claims shows your position on the canvassing map so you can work the neighborhood around you. Your location never leaves your device.</string>
+	<string>Archie Canvass shows your position on the canvassing map so you can work the neighborhood around you. Your location never leaves your device.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>
