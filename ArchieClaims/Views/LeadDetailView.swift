@@ -45,9 +45,14 @@ struct LeadDetailView: View {
             }
 
             Section {
-                if !lead.phone.isEmpty, let telURL = URL(string: "tel://\(lead.phone.filter { $0.isNumber || $0 == "+" })") {
+                if !sanitizedPhone.isEmpty, let telURL = URL(string: "tel://\(sanitizedPhone)") {
                     Link(destination: telURL) {
                         Label("Call \(lead.homeownerName.isEmpty ? "Homeowner" : lead.homeownerName)", systemImage: "phone.fill")
+                    }
+                }
+                if !sanitizedPhone.isEmpty, let smsURL = URL(string: "sms:\(sanitizedPhone)") {
+                    Link(destination: smsURL) {
+                        Label("Text Homeowner", systemImage: "message.fill")
                     }
                 }
                 Button {
@@ -71,6 +76,10 @@ struct LeadDetailView: View {
         }
         .navigationTitle(lead.shortAddress)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: lead.status) {
+            // A status change is a knock — stamp it so it counts toward today.
+            lead.lastKnockAt = Date()
+        }
         .onChange(of: lead) {
             leadStore.update(lead)
         }
@@ -80,6 +89,10 @@ struct LeadDetailView: View {
                 dismiss()
             }
         }
+    }
+
+    private var sanitizedPhone: String {
+        lead.phone.filter { $0.isNumber || $0 == "+" }
     }
 
     private var assistantContext: String {

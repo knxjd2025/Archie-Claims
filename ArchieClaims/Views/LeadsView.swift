@@ -7,12 +7,14 @@ struct LeadsView: View {
     @State private var searchText = ""
 
     private var filtered: [Lead] {
-        leadStore.leads.filter { lead in
-            (filter == nil || lead.status == filter) &&
-            (searchText.isEmpty
-             || lead.address.localizedCaseInsensitiveContains(searchText)
-             || lead.homeownerName.localizedCaseInsensitiveContains(searchText))
-        }
+        leadStore.leads
+            .filter { lead in
+                (filter == nil || lead.status == filter) &&
+                (searchText.isEmpty
+                 || lead.address.localizedCaseInsensitiveContains(searchText)
+                 || lead.homeownerName.localizedCaseInsensitiveContains(searchText))
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     var body: some View {
@@ -66,8 +68,10 @@ struct LeadRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: lead.status.symbolName)
-                .frame(width: 28)
-                .foregroundStyle(Color.accentColor)
+                .font(.caption)
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(lead.status.color, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
                 Text(lead.shortAddress)
                     .font(.subheadline.weight(.semibold))

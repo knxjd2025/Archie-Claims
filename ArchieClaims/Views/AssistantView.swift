@@ -48,12 +48,32 @@ struct AssistantView: View {
         ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
     }
 
-    private let quickPrompts = [
-        "Write a 20-second door script for a neighborhood that just took hail",
-        "Explain ACV vs RCV and depreciation in homeowner-friendly terms",
-        "Give me a roof inspection photo checklist for a hail claim",
-        "Draft a follow-up text for a homeowner who wasn't home"
-    ]
+    /// Prompts adapt to what's attached: a client, a property's storm data, or
+    /// nothing yet — so the first message lands on something relevant.
+    private var quickPrompts: [String] {
+        if attachedClient != nil {
+            return [
+                "Where does this claim stand and what's my next step?",
+                "Draft a follow-up to the adjuster on this claim",
+                "Summarize this client's claim for a quick phone call",
+                "What documentation is still missing for this claim?"
+            ]
+        }
+        if appState.pendingPropertyContext != nil {
+            return [
+                "Summarize this storm evidence for the homeowner",
+                "Is this hail size claim-worthy? Explain why",
+                "Write a door script using this property's storm history",
+                "Draft a text to this homeowner about a free inspection"
+            ]
+        }
+        return [
+            "Write a 20-second door script for a neighborhood that just took hail",
+            "Explain ACV vs RCV and depreciation in homeowner-friendly terms",
+            "Give me a roof inspection photo checklist for a hail claim",
+            "Draft a follow-up text for a homeowner who wasn't home"
+        ]
+    }
 
     var body: some View {
         NavigationStack {
@@ -84,6 +104,7 @@ struct AssistantView: View {
                         }
                         .padding(.vertical, 12)
                     }
+                    .scrollDismissesKeyboard(.interactively)
                     .onChange(of: messages.last?.text) {
                         if let last = messages.last {
                             scrollProxy.scrollTo(last.id, anchor: .bottom)
@@ -533,10 +554,37 @@ struct AssistantView: View {
     }
 }
 
-/// A chat bubble. Assistant text renders basic Markdown; machine-readable
-/// context blocks in user turns are collapsed into attachment chips.
+/// A chat bubble. Assistant text renders full Markdown (lists, headings,
+/// emphasis) per paragraph; machine-readable context blocks in user turns are
+/// collapsed into attachment chips.
 struct MessageBubble: View {
     let message: ChatMessage
+
+    /// Renders assistant Markdown so claim explanations and photo checklists
+    /// keep their list/heading structure instead of being flattened to one line.
+    /// Splits on blank lines and renders each block as inline Markdown.
+    static func markdown(_ text: String) -> some View {
+        let blocks = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .map { line -> AttributedString in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty { return AttributedString(" ") }
+                if let parsed = try? AttributedString(
+                    markdown: line,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                ) {
+                    return parsed
+                }
+                return AttributedString(line)
+            }
+        return VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                Text(block)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
     var body: some View {
         HStack {
@@ -546,7 +594,7 @@ struct MessageBubble: View {
                     ProgressView()
                         .padding(10)
                 } else if message.role == .assistant {
-                    Text(LocalizedStringKey(message.text))
+                    Self.markdown(message.text)
                         .textSelection(.enabled)
                 } else {
                     Text(displayUserText)

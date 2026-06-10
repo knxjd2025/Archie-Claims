@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import SwiftUI
 
 /// A single severe-weather report from the NOAA Storm Prediction Center (SPC)
 /// daily storm reports feed (hail, wind, or tornado).
@@ -85,6 +86,19 @@ struct StormReport: Identifiable, Codable, Hashable {
         let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let there = CLLocation(latitude: latitude, longitude: longitude)
         return here.distance(from: there) / 1609.344
+    }
+}
+
+extension StormReport.Kind {
+    /// Canonical color for this storm kind — the single source of truth used by
+    /// both the canvass map markers and the property-sheet rows so a hail report
+    /// is the same color everywhere.
+    var color: Color {
+        switch self {
+        case .hail: return .orange
+        case .wind: return .blue
+        case .tornado: return .red
+        }
     }
 }
 

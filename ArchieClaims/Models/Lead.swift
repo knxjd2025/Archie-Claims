@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import SwiftUI
 
 /// A canvassing lead: one door, one homeowner conversation.
 struct Lead: Identifiable, Codable, Hashable {
@@ -25,6 +26,19 @@ struct Lead: Identifiable, Codable, Hashable {
             case .notInterested: return "hand.thumbsdown.fill"
             }
         }
+
+        /// Canonical status color, shared by map pins and the leads list.
+        var color: Color {
+            switch self {
+            case .newLead: return .blue
+            case .notHome: return .gray
+            case .interested: return .orange
+            case .appointment: return .purple
+            case .inspected: return .teal
+            case .signed: return .green
+            case .notInterested: return .red
+            }
+        }
     }
 
     var id: UUID
@@ -39,6 +53,14 @@ struct Lead: Identifiable, Codable, Hashable {
     var notes: String
     /// Snapshot of the best nearby storm evidence at the time the lead was saved.
     var stormSummary: String
+    /// When a door was actually knocked (created or status changed) — drives the
+    /// "today" tally so editing notes on an old lead doesn't inflate door counts.
+    /// Optional for migration: leads saved before this field decode to nil and
+    /// fall back to `updatedAt`.
+    var lastKnockAt: Date?
+
+    /// The timestamp that counts as a knock for tallies.
+    var knockedAt: Date { lastKnockAt ?? updatedAt }
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -59,7 +81,8 @@ struct Lead: Identifiable, Codable, Hashable {
         homeownerName: String = "",
         phone: String = "",
         notes: String = "",
-        stormSummary: String = ""
+        stormSummary: String = "",
+        lastKnockAt: Date? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -72,5 +95,6 @@ struct Lead: Identifiable, Codable, Hashable {
         self.phone = phone
         self.notes = notes
         self.stormSummary = stormSummary
+        self.lastKnockAt = lastKnockAt
     }
 }

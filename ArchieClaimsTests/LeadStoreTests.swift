@@ -40,4 +40,23 @@ final class LeadStoreTests: XCTestCase {
         let lead = Lead(address: "123 Main St, Moore, OK 73160", latitude: 0, longitude: 0)
         XCTAssertEqual(lead.shortAddress, "123 Main St")
     }
+
+    func testSetStatusStampsKnock() {
+        let store = makeStore()
+        let lead = Lead(address: "1 Oak", latitude: 35.1, longitude: -80.8)
+        store.add(lead)
+
+        store.setStatus(.signed, for: lead)
+        let saved = store.leads.first
+        XCTAssertEqual(saved?.status, .signed)
+        XCTAssertNotNil(saved?.lastKnockAt)
+        XCTAssertTrue(Calendar.current.isDateInToday(saved?.knockedAt ?? .distantPast))
+    }
+
+    func testKnockedAtFallsBackToUpdatedAt() {
+        // A lead migrated from before lastKnockAt existed (nil) uses updatedAt.
+        let lead = Lead(address: "2 Elm", latitude: 0, longitude: 0)
+        XCTAssertNil(lead.lastKnockAt)
+        XCTAssertEqual(lead.knockedAt, lead.updatedAt)
+    }
 }

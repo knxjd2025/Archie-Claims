@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UIKit
 
 /// Shown when the canvasser taps a house: address, storm evidence, public
 /// contact lookups, save-as-lead, and a handoff into the AI assistant.
@@ -38,6 +39,7 @@ struct PropertySheetView: View {
         NavigationStack {
             List {
                 addressSection
+                logDoorSection
                 stormSection
                 contactSection
                 actionSection
@@ -82,10 +84,25 @@ struct PropertySheetView: View {
                     if let existing = existingLead {
                         Label("Saved lead: \(existing.status.rawValue)", systemImage: existing.status.symbolName)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(existing.status.color)
                     }
                 }
             }
+
+            Button {
+                openInMaps()
+            } label: {
+                Label("Open in Apple Maps", systemImage: "map")
+            }
+        }
+    }
+
+    private func openInMaps() {
+        let query = (geocode?.address ?? "\(coordinate.latitude),\(coordinate.longitude)")
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "http://maps.apple.com/?ll=\(coordinate.latitude),\(coordinate.longitude)&q=\(query)"
+        if let url = URL(string: urlString) {
+            UIApplication.shared.open(url)
         }
     }
 
@@ -151,6 +168,40 @@ struct PropertySheetView: View {
             Text("Owner & Contact Lookup (Free Public Sources)")
         } footer: {
             Text(PublicRecordsLinks.complianceNote)
+        }
+    }
+
+    /// The five outcomes a canvasser logs at the door, in workflow order.
+    private static let doorStatuses: [Lead.Status] = [.notHome, .interested, .appointment, .notInterested, .signed]
+
+    private var logDoorSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Log this door")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Self.doorStatuses) { status in
+                            Button {
+                                logDoor(status)
+                            } label: {
+                                Label(status.rawValue, systemImage: status.symbolName)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        (existingLead?.status == status ? status.color : status.color.opacity(0.15)),
+                                        in: Capsule()
+                                    )
+                                    .foregroundStyle(existingLead?.status == status ? .white : status.color)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .sensoryFeedback(.success, trigger: existingLead?.status)
         }
     }
 
@@ -240,6 +291,23 @@ struct PropertySheetView: View {
             ))
         }
     }
+
+    /// Logs a door outcome from the evidence view — creates or updates the lead
+    /// and stamps the knock so it counts toward today's tally.
+    private func logDoor(_ status: Lead.Status) {
+        if let lead = existingLead {
+            leadStore.setStatus(status, for: lead)
+        } else {
+            leadStore.add(Lead(
+                status: status,
+                address: addressLine,
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+                stormSummary: stormSummary,
+                lastKnockAt: Date()
+            ))
+        }
+    }
 }
 
 /// One storm report row: kind icon, magnitude, distance, date, location.
@@ -278,11 +346,5 @@ struct StormReportRow: View {
         }
     }
 
-    private var iconColor: Color {
-        switch item.report.kind {
-        case .hail: return .cyan
-        case .wind: return .indigo
-        case .tornado: return .red
-        }
-    }
+    private var iconColor: Color { item.report.kind.color }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UIKit
 
 /// The canvassing map — built to be the fastest door-to-door storm tool:
 ///  - Storm overlay: recent NOAA SPC hail/wind/tornado reports drawn right on
@@ -16,18 +17,23 @@ struct CanvassMapView: View {
     @AppStorage(AppSettings.searchRadiusKey) private var radiusMiles = AppSettings.defaultRadiusMiles
     @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
 
-    /// Charlotte, NC — the default canvassing area for testing.
+    /// Charlotte, NC — a sensible national fallback only when we have neither a
+    /// remembered camera nor a location fix yet.
     static let charlotte = CLLocationCoordinate2D(latitude: 35.2271, longitude: -80.8431)
 
-    @State private var cameraPosition: MapCameraPosition = .region(
-        MKCoordinateRegion(
-            center: CanvassMapView.charlotte,
-            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
-        )
-    )
+    @State private var cameraPosition: MapCameraPosition = CanvassMapView.initialCameraPosition()
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var tappedCoordinate: TappedSpot?
     @State private var useHybrid = true
+    @State private var showLegend = false
+
+    @State private var undo: UndoState?
+    struct UndoState: Identifiable {
+        let id = UUID()
+        let leadID: UUID
+        let status: Lead.Status
+        let wasNew: Bool
+    }
 
     @State private var searchText = ""
     @State private var searchResults: [GeocodingService.Place] = []
@@ -105,6 +111,7 @@ struct CanvassMapView: View {
                 }
                 .onMapCameraChange(frequency: .onEnd) { context in
                     visibleRegion = context.region
+                    Self.persistCamera(context.region)
                     scheduleStormOverlayRefresh(for: context.region)
                 }
                 .onTapGesture { screenPoint in
@@ -151,6 +158,12 @@ struct CanvassMapView: View {
                     if !leadStore.leads.isEmpty {
                         statusChips
                     }
+                    if isLoadingStorms {
+                        statusPill(text: "Checking storms…", systemImage: nil, showsSpinner: true)
+                    } else if showStormOverlay, !stormMarkers.isEmpty {
+                        statusPill(text: "\(stormMarkers.count) storm report\(stormMarkers.count == 1 ? "" : "s") here",
+                                   systemImage: "cloud.bolt.rain.fill", showsSpinner: false)
+                    }
                     if quickLogMode {
                         Text("⚡️ Quick Log on — tap a roof, pick a status")
                             .font(.caption.weight(.semibold))
@@ -161,12 +174,23 @@ struct CanvassMapView: View {
                     }
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                if showStormOverlay {
+                    stormLegend
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 zoomControls
             }
             .overlay(alignment: .bottom) {
                 bottomBar
             }
+            .overlay(alignment: .bottom) {
+                if let undo {
+                    undoToast(undo)
+                }
+            }
+            .sensoryFeedback(.success, trigger: undo?.id)
             .sheet(item: $tappedCoordinate) { spot in
                 PropertySheetView(coordinate: spot.coordinate)
                     .presentationDetents([.medium, .large])
@@ -215,9 +239,10 @@ struct CanvassMapView: View {
     // MARK: - Quick log
 
     private func quickLog(_ status: Lead.Status, at coordinate: CLLocationCoordinate2D) {
-        if var existing = leadStore.lead(near: coordinate.latitude, longitude: coordinate.longitude) {
-            existing.status = status
-            leadStore.update(existing)
+        if let existing = leadStore.lead(near: coordinate.latitude, longitude: coordinate.longitude) {
+            let priorStatus = existing.status
+            leadStore.setStatus(status, for: existing)
+            showUndo(UndoState(leadID: existing.id, status: priorStatus, wasNew: false))
             return
         }
 
@@ -225,9 +250,11 @@ struct CanvassMapView: View {
             status: status,
             address: "Locating address…",
             latitude: coordinate.latitude,
-            longitude: coordinate.longitude
+            longitude: coordinate.longitude,
+            lastKnockAt: Date()
         )
         leadStore.add(lead)
+        showUndo(UndoState(leadID: lead.id, status: status, wasNew: true))
 
         // Address + storm evidence fill in behind the scenes — the canvasser
         // is already walking to the next door.
@@ -250,18 +277,107 @@ struct CanvassMapView: View {
         }
     }
 
+    private func showUndo(_ state: UndoState) {
+        let heavy = state.status == .signed
+        if heavy {
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        }
+        withAnimation { undo = state }
+        let pending = state.id
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if undo?.id == pending { withAnimation { undo = nil } }
+        }
+    }
+
+    private func performUndo(_ state: UndoState) {
+        if state.wasNew {
+            if let lead = leadStore.leads.first(where: { $0.id == state.leadID }) {
+                leadStore.delete(lead)
+            }
+        } else if let lead = leadStore.leads.first(where: { $0.id == state.leadID }) {
+            leadStore.setStatus(state.status, for: lead)
+        }
+        withAnimation { undo = nil }
+    }
+
+    private func undoToast(_ state: UndoState) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: state.wasNew ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+                .foregroundStyle(.white)
+            Text("Logged: \(currentStatusLabel(for: state.leadID))")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+            Spacer(minLength: 8)
+            Button("Undo") { performUndo(state) }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .background(Color.black.opacity(0.82), in: Capsule())
+        .padding(.horizontal, 40)
+        .padding(.bottom, 56)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func currentStatusLabel(for id: UUID) -> String {
+        leadStore.leads.first(where: { $0.id == id })?.status.rawValue ?? "door"
+    }
+
     // MARK: - Storm overlay
 
     private func stormMarker(_ item: NearbyStormReport) -> some View {
         Image(systemName: item.report.kind.symbolName)
             .font(.system(size: 11, weight: .bold))
             .padding(5)
-            .background(color(for: item.report.kind).opacity(0.85), in: Circle())
+            .background(item.report.kind.color.opacity(0.85), in: Circle())
             .foregroundStyle(.white)
             .shadow(radius: 1)
             .onTapGesture {
                 tappedCoordinate = TappedSpot(coordinate: item.report.coordinate)
             }
+    }
+
+    private var stormLegend: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation { showLegend.toggle() }
+            } label: {
+                Image(systemName: showLegend ? "chevron.down.circle.fill" : "list.bullet.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor, Color(.systemBackground))
+            }
+            .buttonStyle(.plain)
+            if showLegend {
+                ForEach(StormReport.Kind.allCases, id: \.self) { kind in
+                    HStack(spacing: 6) {
+                        Circle().fill(kind.color).frame(width: 9, height: 9)
+                        Text(kind.label).font(.caption2)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+        .padding(.leading, 10)
+        .padding(.bottom, 56)
+    }
+
+    private func statusPill(text: String, systemImage: String?, showsSpinner: Bool) -> some View {
+        HStack(spacing: 6) {
+            if showsSpinner {
+                ProgressView().controlSize(.mini)
+            } else if let systemImage {
+                Image(systemName: systemImage).font(.caption2)
+            }
+            Text(text).font(.caption.weight(.medium))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.1), radius: 2)
     }
 
     private func scheduleStormOverlayRefresh(for region: MKCoordinateRegion) {
@@ -281,14 +397,6 @@ struct CanvassMapView: View {
             guard !Task.isCancelled else { return }
             stormMarkers = Array(reports.prefix(80))
             isLoadingStorms = false
-        }
-    }
-
-    private func color(for kind: StormReport.Kind) -> Color {
-        switch kind {
-        case .hail: return .orange
-        case .wind: return .blue
-        case .tornado: return .red
         }
     }
 
@@ -347,7 +455,7 @@ struct CanvassMapView: View {
 
     private var todayStats: some View {
         let calendar = Calendar.current
-        let today = leadStore.leads.filter { calendar.isDateInToday($0.updatedAt) }
+        let today = leadStore.leads.filter { calendar.isDateInToday($0.knockedAt) }
         let appointments = today.filter { $0.status == .appointment }.count
         let interested = today.filter { $0.status == .interested }.count
         let signed = today.filter { $0.status == .signed }.count
@@ -514,15 +622,34 @@ struct CanvassMapView: View {
         }
     }
 
-    private func color(for status: Lead.Status) -> Color {
-        switch status {
-        case .newLead: return .blue
-        case .notHome: return .gray
-        case .interested: return .orange
-        case .appointment: return .purple
-        case .inspected: return .teal
-        case .signed: return .green
-        case .notInterested: return .red
+    private func color(for status: Lead.Status) -> Color { status.color }
+
+    // MARK: - Camera persistence
+
+    /// First launch (or after the user's last region was cleared) follows the
+    /// device location, falling back to Charlotte; otherwise restores the last
+    /// region the rep was looking at.
+    private static func initialCameraPosition() -> MapCameraPosition {
+        let defaults = UserDefaults.standard
+        let lat = defaults.double(forKey: AppSettings.lastCameraLatKey)
+        let lon = defaults.double(forKey: AppSettings.lastCameraLonKey)
+        let span = defaults.double(forKey: AppSettings.lastCameraSpanKey)
+        if lat != 0, lon != 0, span > 0 {
+            return .region(MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
+            ))
         }
+        return .userLocation(fallback: .region(MKCoordinateRegion(
+            center: charlotte,
+            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
+        )))
+    }
+
+    private static func persistCamera(_ region: MKCoordinateRegion) {
+        let defaults = UserDefaults.standard
+        defaults.set(region.center.latitude, forKey: AppSettings.lastCameraLatKey)
+        defaults.set(region.center.longitude, forKey: AppSettings.lastCameraLonKey)
+        defaults.set(region.span.latitudeDelta, forKey: AppSettings.lastCameraSpanKey)
     }
 }

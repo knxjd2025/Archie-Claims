@@ -5,8 +5,7 @@ import SwiftUI
 /// it lives in the Keychain (see `KeychainStore`).
 enum AppSettings {
     /// Identifies the app to NOAA/NWS APIs per their User-Agent guidance.
-    /// Replace with your real support address before release.
-    static let contactEmailForAPIs = "support@example.com"
+    static let contactEmailForAPIs = "support@archie.now"
 
     static let searchRadiusKey = "settings.searchRadiusMiles"
     static let lookbackDaysKey = "settings.lookbackDays"
@@ -15,6 +14,10 @@ enum AppSettings {
     static let onboardingDoneKey = "settings.onboardingDone"
     static let assistantModeKey = "settings.assistantMode"
     static let archieBaseURLKey = "settings.archieBaseURL"
+    /// Last map camera region, so the app reopens where the rep left off.
+    static let lastCameraLatKey = "settings.lastCameraLat"
+    static let lastCameraLonKey = "settings.lastCameraLon"
+    static let lastCameraSpanKey = "settings.lastCameraSpan"
 
     static let defaultRadiusMiles: Double = 10
     static let defaultLookbackDays: Int = 30

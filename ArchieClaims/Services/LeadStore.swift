@@ -5,6 +5,9 @@ import Foundation
 @MainActor
 final class LeadStore: ObservableObject {
     @Published private(set) var leads: [Lead] = []
+    /// Set when the last disk write failed — surfaced as a banner so a rep never
+    /// silently loses a day of knocks to a full disk or encoding error.
+    @Published var lastSaveError: String?
 
     private let fileURL: URL
 
@@ -26,6 +29,18 @@ final class LeadStore: ObservableObject {
         var updated = lead
         updated.updatedAt = Date()
         leads[index] = updated
+        save()
+    }
+
+    /// Records a knock outcome: updates the status and stamps `lastKnockAt` so
+    /// the door counts toward today's tally. Use this (not `update`) whenever a
+    /// door is dispositioned, vs. editing notes/contact fields.
+    func setStatus(_ status: Lead.Status, for lead: Lead) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        let now = Date()
+        leads[index].status = status
+        leads[index].lastKnockAt = now
+        leads[index].updatedAt = now
         save()
     }
 
@@ -55,7 +70,12 @@ final class LeadStore: ObservableObject {
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(leads) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        do {
+            let data = try JSONEncoder().encode(leads)
+            try data.write(to: fileURL, options: .atomic)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = "Couldn't save leads to this device (\(error.localizedDescription)). Free up storage; your current leads are still on screen."
+        }
     }
 }
