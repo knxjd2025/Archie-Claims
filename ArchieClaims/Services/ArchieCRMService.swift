@@ -105,21 +105,25 @@ extension ArchieBackendService {
         let remainingCredits: Int?
     }
 
-    struct CreditPackage: Identifiable {
+    struct CreditItem: Identifiable {
         let id: String
+        let kind: String        // "subscription" | "pack"
+        let interval: String?   // "month" | "year"
         let credits: Int
-        let usd: Double
+        let label: String
+        let appleUSD: Double
+        let appleProductID: String
+        let stripeUSD: Double
     }
 
     struct CreditInfo {
         var balance: Int
         var plan: String?
         var costPerReport: Int
-        var packages: [CreditPackage]
-        var subscriptionMonthly: Double?
-        var subscriptionAnnual: Double?
-        var monthlyCredits: Int?
-        var paygPerCredit: Double?
+        var items: [CreditItem]
+        var paygAppleUSD: Double?
+        var paygStripeUSD: Double?
+        var stripeDiscountPercent: Int
     }
 
     enum OwnerLookupError: LocalizedError {
@@ -147,21 +151,53 @@ extension ArchieBackendService {
         let result = try await authorizedJSON(path: "api/property/credits")
         guard let dict = result as? [String: Any] else { throw BackendError.malformedResponse }
         let catalog = dict["catalog"] as? [String: Any] ?? [:]
-        let sub = catalog["subscription"] as? [String: Any] ?? [:]
-        let packs = (catalog["packages"] as? [[String: Any]] ?? []).compactMap { p -> CreditPackage? in
-            guard let id = p["id"] as? String, let credits = p["credits"] as? Int else { return nil }
-            return CreditPackage(id: id, credits: credits, usd: (p["usd"] as? NSNumber)?.doubleValue ?? 0)
+        let payg = catalog["pay_as_you_go"] as? [String: Any] ?? [:]
+        let items = (catalog["items"] as? [[String: Any]] ?? []).compactMap { i -> CreditItem? in
+            guard let id = i["id"] as? String, let credits = i["credits"] as? Int,
+                  let productID = i["apple_product_id"] as? String else { return nil }
+            return CreditItem(
+                id: id,
+                kind: i["kind"] as? String ?? "pack",
+                interval: i["interval"] as? String,
+                credits: credits,
+                label: i["label"] as? String ?? "\(credits) credits",
+                appleUSD: (i["apple_usd"] as? NSNumber)?.doubleValue ?? 0,
+                appleProductID: productID,
+                stripeUSD: (i["stripe_usd"] as? NSNumber)?.doubleValue ?? 0
+            )
         }
         return CreditInfo(
             balance: dict["balance"] as? Int ?? 0,
             plan: dict["plan"] as? String,
             costPerReport: dict["cost_per_report"] as? Int ?? 1,
-            packages: packs,
-            subscriptionMonthly: (sub["monthly_usd"] as? NSNumber)?.doubleValue,
-            subscriptionAnnual: (sub["annual_usd"] as? NSNumber)?.doubleValue,
-            monthlyCredits: sub["monthly_credits"] as? Int,
-            paygPerCredit: (catalog["pay_as_you_go_usd_per_credit"] as? NSNumber)?.doubleValue
+            items: items,
+            paygAppleUSD: (payg["apple_usd"] as? NSNumber)?.doubleValue,
+            paygStripeUSD: (payg["stripe_usd"] as? NSNumber)?.doubleValue,
+            stripeDiscountPercent: catalog["stripe_discount_percent"] as? Int ?? 10
         )
+    }
+
+    /// `POST /api/property/credits/checkout` — Stripe web checkout URL (10% off).
+    func creditCheckoutURL(itemID: String) async throws -> URL {
+        let result = try await authorizedJSON(
+            path: "api/property/credits/checkout", method: "POST", body: ["item_id": itemID]
+        )
+        guard let dict = result as? [String: Any],
+              let urlString = dict["url"] as? String, let url = URL(string: urlString) else {
+            throw BackendError.malformedResponse
+        }
+        return url
+    }
+
+    /// `POST /api/property/credits/iap` — redeem an Apple StoreKit purchase.
+    /// Returns the new credit balance.
+    @discardableResult
+    func redeemIAP(productID: String, transactionID: String) async throws -> Int {
+        let result = try await authorizedJSON(
+            path: "api/property/credits/iap", method: "POST",
+            body: ["product_id": productID, "transaction_id": transactionID]
+        )
+        return (result as? [String: Any])?["balance"] as? Int ?? 0
     }
 
     /// `POST /api/property/owner-report` — spends 1 data credit, returns the

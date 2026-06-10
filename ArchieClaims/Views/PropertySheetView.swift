@@ -85,8 +85,10 @@ struct PropertySheetView: View {
                 SafariView(url: item.url)
                     .ignoresSafeArea()
             }
-            .sheet(isPresented: $showCreditStore) {
-                CreditStoreView(info: creditInfo)
+            .sheet(isPresented: $showCreditStore, onDismiss: { Task { await loadCredits() } }) {
+                CreditStoreView(info: creditInfo) { newBalance in
+                    creditInfo?.balance = newBalance
+                }
             }
         }
     }

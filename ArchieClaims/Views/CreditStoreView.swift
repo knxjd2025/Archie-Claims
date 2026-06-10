@@ -1,11 +1,34 @@
 import SwiftUI
+import StoreKit
 
-/// Data-credits store. Shows the balance, subscription, and credit packages.
-/// Purchasing is not wired yet (pending the Stripe/Apple-IAP decision), so this
-/// is informational + a link to manage the plan on the web for now.
+/// Data-credits store with two ways to pay per item: Apple In-App Purchase at
+/// the normal price, or Stripe on the web at a discount. Stripe checkout opens
+/// in Safari (the purchase happens outside the app); Apple purchases redeem
+/// with the backend, which grants the credits.
 struct CreditStoreView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
+
     let info: ArchieBackendService.CreditInfo?
+    /// Called after a successful Apple purchase so the caller can refresh balance.
+    var onPurchased: ((Int) -> Void)?
+
+    @StateObject private var store = StoreManager()
+    @State private var balance: Int = 0
+    @State private var message: String?
+    @State private var working = false
+
+    private var service: ArchieBackendService {
+        ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
+    }
+
+    private var subscriptions: [ArchieBackendService.CreditItem] {
+        info?.items.filter { $0.kind == "subscription" } ?? []
+    }
+    private var packs: [ArchieBackendService.CreditItem] {
+        info?.items.filter { $0.kind == "pack" } ?? []
+    }
+    private var discount: Int { info?.stripeDiscountPercent ?? 10 }
 
     var body: some View {
         NavigationStack {
@@ -13,79 +36,124 @@ struct CreditStoreView: View {
                 Section {
                     HStack {
                         Image(systemName: "creditcard.circle.fill")
-                            .font(.title)
-                            .foregroundStyle(Color.accentColor)
+                            .font(.title).foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading) {
-                            Text("\(info?.balance ?? 0) data credits")
-                                .font(.title3.bold())
+                            Text("\(balance) data credits").font(.title3.bold())
                             Text("1 credit pulls one verified owner report.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    Text("Pay with Apple, or save \(discount)% paying on the web.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
-                if let info, let monthly = info.subscriptionMonthly {
-                    Section("Subscription") {
-                        planRow(
-                            title: "Archie Pro — Monthly",
-                            detail: "\(info.monthlyCredits ?? 100) credits / month",
-                            price: usd(monthly) + "/mo"
-                        )
-                        if let annual = info.subscriptionAnnual {
-                            planRow(
-                                title: "Archie Pro — Annual",
-                                detail: "\(info.monthlyCredits ?? 100) credits / month · best value",
-                                price: usd(annual) + "/yr"
-                            )
-                        }
+                if !subscriptions.isEmpty {
+                    Section("Subscription — \(subscriptions.first?.credits ?? 100) credits / month") {
+                        ForEach(subscriptions) { itemRows($0) }
                     }
                 }
-
-                if let packages = info?.packages, !packages.isEmpty {
+                if !packs.isEmpty {
                     Section("Credit packs") {
-                        ForEach(packages) { pack in
-                            planRow(
-                                title: "\(pack.credits) credits",
-                                detail: String(format: "%.0f¢ per credit", (pack.usd / Double(pack.credits)) * 100),
-                                price: usd(pack.usd)
-                            )
-                        }
+                        ForEach(packs) { itemRows($0) }
                     }
                 }
 
-                if let payg = info?.paygPerCredit {
-                    Section {
-                        planRow(title: "Pay as you go", detail: "Single credits, no commitment", price: usd(payg) + "/credit")
-                    }
-                }
-
-                Section {
-                    Link(destination: URL(string: "https://app.archie.now/billing")!) {
-                        Label("Manage plan & buy credits", systemImage: "arrow.up.right.square")
-                    }
-                } footer: {
-                    Text("In-app purchasing is coming soon. For now, manage your plan and credits at app.archie.now.")
+                if let message {
+                    Section { Text(message).font(.caption).foregroundStyle(.secondary) }
                 }
             }
             .navigationTitle("Data Credits")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+            .task {
+                balance = info?.balance ?? 0
+                await store.loadProducts(ids: (info?.items ?? []).map(\.appleProductID))
             }
         }
     }
 
-    private func planRow(title: String, detail: String, price: String) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder
+    private func itemRows(_ item: ArchieBackendService.CreditItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.label).font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 10) {
+                // Apple — normal price (only if the StoreKit product loaded).
+                if let product = store.product(for: item.appleProductID) {
+                    Button {
+                        buyWithApple(item, product: product)
+                    } label: {
+                        payLabel(system: "apple.logo", title: "Apple", price: product.displayPrice)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(working || store.purchasingID != nil)
+                }
+
+                // Stripe — web, discounted.
+                Button {
+                    buyWithStripe(item)
+                } label: {
+                    payLabel(system: "safari", title: "Web · save \(discount)%", price: usd(item.stripeUSD))
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(working)
             }
-            Spacer()
-            Text(price).font(.subheadline.weight(.semibold))
+            if store.purchasingID == item.appleProductID {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func payLabel(system: String, title: String, price: String) -> some View {
+        VStack(spacing: 1) {
+            Label(title, systemImage: system).font(.caption.weight(.medium))
+            Text(price).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Purchase flows
+
+    private func buyWithApple(_ item: ArchieBackendService.CreditItem, product: Product) {
+        message = nil
+        Task {
+            do {
+                let outcome = try await store.purchase(product)
+                switch outcome {
+                case .success(let txID, let productID):
+                    working = true
+                    let newBalance = try await service.redeemIAP(productID: productID, transactionID: txID)
+                    balance = newBalance
+                    onPurchased?(newBalance)
+                    message = "Credits added. You now have \(newBalance)."
+                    working = false
+                case .pending:
+                    message = "Your purchase is pending approval. Credits will appear once it's approved."
+                case .cancelled:
+                    break
+                }
+            } catch {
+                working = false
+                message = error.localizedDescription
+            }
+        }
+    }
+
+    private func buyWithStripe(_ item: ArchieBackendService.CreditItem) {
+        message = nil
+        working = true
+        Task {
+            do {
+                let url = try await service.creditCheckoutURL(itemID: item.id)
+                await UIApplication.shared.open(url)
+                message = "Finish your purchase in the browser, then return here — your new balance shows up automatically."
+            } catch {
+                message = error.localizedDescription
+            }
+            working = false
         }
     }
 
