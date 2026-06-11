@@ -11,6 +11,17 @@ Work top-to-bottom. Every value you need is in this doc — never invent values.
 ## Step 0 — Sign in
 https://appstoreconnect.apple.com — James signs in with the SAME Apple ID he uses in Xcode (his developer account, team ID `98Q3J3KX84`), approves 2FA on his phone.
 
+## Step 0.4 — REGISTER THE BUNDLE ID (verified missing as of 2026-06-10 — do this first)
+The bundle ID is NOT yet registered on James's developer account, so it won't appear in Step 0.5's dropdown until this is done.
+1. Go to https://developer.apple.com/account → **Certificates, Identifiers & Profiles** → **Identifiers**.
+2. ⚠️ If the account belongs to more than one team, make sure the selected team (top-right) is the one with **Team ID `98Q3J3KX84`** (James's personal "JAMES FREDERICK TURNER" team) — NOT any other team.
+3. Click the **"+"** next to Identifiers → select **App IDs** → Continue → type **App** → Continue.
+4. Fill in:
+   - **Description:** `Archie Canvass`
+   - **Bundle ID:** select **Explicit** (not Wildcard) and type exactly: `com.archieclaims.app`
+   - **Capabilities:** check **In-App Purchase** if it isn't already checked (it's usually on by default).
+5. Click **Continue** → **Register**.
+
 ## Step 0.5 — CREATE THE APP RECORD (everything else depends on this)
 1. From the App Store Connect homepage, click **Apps**.
 2. Click the **blue "+" button** (top-left of the Apps list) → **New App**.
@@ -141,3 +152,4 @@ Click **Add for Review → Submit to App Review**.
 - If ASC's UI shows different field names than this doc (Apple moves things), match by meaning, not position.
 - If something requires a decision not covered here (e.g., name "Archie Canvass" taken), STOP and ask James.
 - Never change the bundle ID. The uploaded binary is `com.archieclaims.app`.
+
