@@ -9,12 +9,12 @@ Work top-to-bottom. Every value you need is in this doc — never invent values.
 ---
 
 ## Step 0 — Sign in
-https://appstoreconnect.apple.com — James signs in with the SAME Apple ID he uses in Xcode (his developer account, team ID `98Q3J3KX84`), approves 2FA on his phone.
+https://appstoreconnect.apple.com — James signs in with the SAME Apple ID he uses in Xcode, approves 2FA on his phone. If a team picker appears, choose **SellMore Solutions LLC** (Team ID `98Q3J3KX84`).
 
 ## Step 0.4 — REGISTER THE BUNDLE ID (verified missing as of 2026-06-10 — do this first)
 The bundle ID is NOT yet registered on James's developer account, so it won't appear in Step 0.5's dropdown until this is done.
 1. Go to https://developer.apple.com/account → **Certificates, Identifiers & Profiles** → **Identifiers**.
-2. ⚠️ If the account belongs to more than one team, make sure the selected team (top-right) is the one with **Team ID `98Q3J3KX84`** (James's personal "JAMES FREDERICK TURNER" team) — NOT any other team.
+2. ⚠️ If the account belongs to more than one team, make sure the selected team (top-right) is **SellMore Solutions LLC — Team ID `98Q3J3KX84`** — NOT any other team.
 3. Click the **"+"** next to Identifiers → select **App IDs** → Continue → type **App** → Continue.
 4. Fill in:
    - **Description:** `Archie Canvass`
