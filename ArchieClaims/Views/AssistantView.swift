@@ -10,9 +10,6 @@ import UniformTypeIdentifiers
 struct AssistantView: View {
     @EnvironmentObject private var appState: AppState
 
-    @AppStorage(AppSettings.modelOverrideKey) private var modelOverride = ""
-    @AppStorage(AppSettings.proxyBaseURLKey) private var proxyBaseURL = ""
-    @AppStorage(AppSettings.assistantModeKey) private var assistantModeRaw = ""
     @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
     @State private var messages: [ChatMessage] = []
@@ -38,10 +35,6 @@ struct AssistantView: View {
         let data: Data?
         let mimeType: String
         var crmStatus: String? = nil
-    }
-
-    private var assistantMode: AppSettings.AssistantMode {
-        AppSettings.assistantMode(from: assistantModeRaw)
     }
 
     private var archieService: ArchieBackendService {
@@ -188,7 +181,7 @@ struct AssistantView: View {
             }
             .padding(.horizontal)
 
-            if assistantMode == .archie, ArchieBackendService.signedInEmail == nil {
+            if ArchieBackendService.signedInEmail == nil {
                 Button {
                     showAuthSheet = true
                 } label: {
@@ -415,8 +408,7 @@ struct AssistantView: View {
 
     /// Files are pushed to the CRM only when a client with a claim is attached.
     private var crmPushPlanned: Bool {
-        assistantMode == .archie
-            && ArchieBackendService.signedInEmail != nil
+        ArchieBackendService.signedInEmail != nil
             && attachedClient?.claimID != nil
     }
 
@@ -467,20 +459,9 @@ struct AssistantView: View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
-        let mode = assistantMode
-        var legacyAPIKey = ""
-        switch mode {
-        case .archie:
-            guard ArchieBackendService.signedInEmail != nil else {
-                showAuthSheet = true
-                return
-            }
-        case .anthropic:
-            guard let apiKey = KeychainStore.read(), !apiKey.isEmpty else {
-                errorText = "Add your Anthropic API key in Settings → AI Assistant to use Archie."
-                return
-            }
-            legacyAPIKey = apiKey
+        guard ArchieBackendService.signedInEmail != nil else {
+            showAuthSheet = true
+            return
         }
 
         errorText = nil
@@ -515,18 +496,7 @@ struct AssistantView: View {
         messages.append(assistantMessage)
         isStreaming = true
 
-        let stream: AsyncThrowingStream<String, Error>
-        switch mode {
-        case .archie:
-            stream = archieService.streamReply(history: history, clientContext: attachedClient?.context)
-        case .anthropic:
-            let service = ClaudeService(
-                apiKey: legacyAPIKey,
-                baseURL: AppSettings.baseURL(from: proxyBaseURL),
-                model: AppSettings.model(from: modelOverride)
-            )
-            stream = service.streamReply(history: history)
-        }
+        let stream = archieService.streamReply(history: history, clientContext: attachedClient?.context)
 
         streamTask = Task {
             do {

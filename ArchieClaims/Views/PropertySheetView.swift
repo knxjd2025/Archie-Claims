@@ -163,7 +163,7 @@ struct PropertySheetView: View {
     private func openInMaps() {
         let query = (geocode?.address ?? "\(coordinate.latitude),\(coordinate.longitude)")
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "http://maps.apple.com/?ll=\(coordinate.latitude),\(coordinate.longitude)&q=\(query)"
+        let urlString = "https://maps.apple.com/?ll=\(coordinate.latitude),\(coordinate.longitude)&q=\(query)"
         if let url = URL(string: urlString) {
             UIApplication.shared.open(url)
         }
