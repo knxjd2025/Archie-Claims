@@ -7,7 +7,6 @@ import StoreKit
 /// with the backend, which grants the credits.
 struct CreditStoreView: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
     let info: ArchieBackendService.CreditInfo?
     /// Called after a successful Apple purchase so the caller can refresh balance.
@@ -16,12 +15,7 @@ struct CreditStoreView: View {
     @EnvironmentObject private var store: StoreManager
     @State private var balance: Int = 0
     @State private var message: String?
-    @State private var working = false
     @State private var restoring = false
-
-    private var service: ArchieBackendService {
-        ArchieBackendService(baseURL: AppSettings.archieBaseURL(from: archieBaseURL))
-    }
 
     private var subscriptions: [ArchieBackendService.CreditItem] {
         info?.items.filter { $0.kind == "subscription" } ?? []
@@ -29,7 +23,6 @@ struct CreditStoreView: View {
     private var packs: [ArchieBackendService.CreditItem] {
         info?.items.filter { $0.kind == "pack" } ?? []
     }
-    private var discount: Int { info?.stripeDiscountPercent ?? 10 }
 
     var body: some View {
         NavigationStack {
@@ -44,7 +37,7 @@ struct CreditStoreView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Text("Pay with Apple, or save \(discount)% paying on the web.")
+                    Text("Credits are added instantly to your account.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -113,26 +106,15 @@ struct CreditStoreView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.label).font(.subheadline.weight(.semibold))
 
-            HStack(spacing: 10) {
-                // Apple — normal price (only if the StoreKit product loaded).
-                if let product = store.product(for: item.appleProductID) {
-                    Button {
-                        buyWithApple(item, product: product)
-                    } label: {
-                        payLabel(system: "apple.logo", title: "Apple", price: product.displayPrice)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(working || store.purchasingID != nil)
-                }
-
-                // Stripe — web, discounted.
+            // Apple In-App Purchase (only if the StoreKit product loaded).
+            if let product = store.product(for: item.appleProductID) {
                 Button {
-                    buyWithStripe(item)
+                    buyWithApple(item, product: product)
                 } label: {
-                    payLabel(system: "safari", title: "Web · save \(discount)%", price: usd(item.stripeUSD))
+                    payLabel(system: "apple.logo", title: "Buy", price: product.displayPrice)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(working)
+                .disabled(store.purchasingID != nil)
             }
             if store.purchasingID == item.appleProductID {
                 ProgressView().controlSize(.small)
@@ -189,22 +171,4 @@ struct CreditStoreView: View {
         }
     }
 
-    private func buyWithStripe(_ item: ArchieBackendService.CreditItem) {
-        message = nil
-        working = true
-        Task {
-            do {
-                let url = try await service.creditCheckoutURL(itemID: item.id)
-                await UIApplication.shared.open(url)
-                message = "Finish your purchase in the browser, then return here — your new balance shows up automatically."
-            } catch {
-                message = error.localizedDescription
-            }
-            working = false
-        }
-    }
-
-    private func usd(_ value: Double) -> String {
-        value == value.rounded() ? String(format: "$%.0f", value) : String(format: "$%.2f", value)
-    }
 }
