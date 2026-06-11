@@ -1,17 +1,31 @@
 # App Store Connect Walkthrough — Archie Canvass
 
-**For:** A Claude agent with browser access (Claude for Chrome / Cowork), working with James (he handles 2FA).
-**Goal:** Take the existing app record from empty to "Waiting for Review."
-**State when written (2026-06-10):** App record created (iOS, name Archie Canvass, bundle `com.archieclaims.app`, SKU `archie-canvass-ios`). Build 1.0 (1) uploaded from Xcode (if not visible yet, it's still processing — continue with other steps; the build is selected in Step 8). All code work is done; do NOT ask for code changes.
+**For:** A Claude agent with browser access (Claude for Chrome / Cowork), working with James (he handles 2FA and final clicks).
+**Goal:** Take Archie Canvass from "doesn't exist in App Store Connect" to "Waiting for Review."
+**State when written (2026-06-10):** The app binary is FULLY BUILT and waiting on James's Mac — a desktop Claude Code session uploads it on request (Step 0.5). All code work is done; do NOT ask for or suggest code changes. James already has one other app in this account, so the account itself works.
 
-Work top-to-bottom. Every value you need is in this doc — never invent values.
+Work top-to-bottom. Every value you need is in this doc — never invent values. James is new to App Store Connect: narrate what you're doing and why, one step at a time.
 
 ---
 
 ## Step 0 — Sign in
-https://appstoreconnect.apple.com — James signs in (2FA). Team: the one containing Archie Canvass.
+https://appstoreconnect.apple.com — James signs in with the SAME Apple ID he uses in Xcode (his developer account, team ID `98Q3J3KX84`), approves 2FA on his phone.
 
-## Step 1 — Agreements gate (do first, it has processing lag)
+## Step 0.5 — CREATE THE APP RECORD (everything else depends on this)
+1. From the App Store Connect homepage, click **Apps**.
+2. Click the **blue "+" button** (top-left of the Apps list) → **New App**.
+3. Fill the dialog EXACTLY:
+   - **Platforms:** ✓ iOS
+   - **Name:** `Archie Canvass`
+   - **Primary Language:** English (U.S.)
+   - **Bundle ID:** ⚠️ THE CRITICAL FIELD. It's a dropdown — select **`com.archieclaims.app`** (may display as "XC com archieclaims app - com.archieclaims.app"). Selecting any other ID, or a Wildcard, breaks the upload. If `com.archieclaims.app` is NOT in the dropdown, STOP and tell James to ask his desktop Claude session — do not pick a substitute.
+   - **SKU:** `archie-canvass-ios`
+   - **User Access:** Full Access
+4. Click **Create**. You land on an empty app page — expected.
+5. **NOW: tell James to switch to his desktop Claude Code session and say "record created — upload."** The desktop session uploads the finished binary from his Mac (the browser cannot do this part). Apple takes ~15–60 min to process the build after upload.
+6. Continue with the steps below while the build processes — nothing below except Step 8 needs the build.
+
+## Step 1 — Agreements gate (do early, it has processing lag)
 Business (or "Agreements, Tax, and Banking") → confirm **Paid Apps / Paid Applications agreement = Active**, with bank account and tax forms complete.
 - If not Active: James must accept the agreement and fill banking/tax now. **IAP creation (Step 4) works while pending, but nothing is purchasable until Active.** Don't block on it — continue.
 
