@@ -113,7 +113,6 @@ extension ArchieBackendService {
         let label: String
         let appleUSD: Double
         let appleProductID: String
-        let stripeUSD: Double
     }
 
     struct CreditInfo {
@@ -122,8 +121,6 @@ extension ArchieBackendService {
         var costPerReport: Int
         var items: [CreditItem]
         var paygAppleUSD: Double?
-        var paygStripeUSD: Double?
-        var stripeDiscountPercent: Int
     }
 
     enum OwnerLookupError: LocalizedError {
@@ -162,8 +159,7 @@ extension ArchieBackendService {
                 credits: credits,
                 label: i["label"] as? String ?? "\(credits) credits",
                 appleUSD: (i["apple_usd"] as? NSNumber)?.doubleValue ?? 0,
-                appleProductID: productID,
-                stripeUSD: (i["stripe_usd"] as? NSNumber)?.doubleValue ?? 0
+                appleProductID: productID
             )
         }
         return CreditInfo(
@@ -171,22 +167,8 @@ extension ArchieBackendService {
             plan: dict["plan"] as? String,
             costPerReport: dict["cost_per_report"] as? Int ?? 1,
             items: items,
-            paygAppleUSD: (payg["apple_usd"] as? NSNumber)?.doubleValue,
-            paygStripeUSD: (payg["stripe_usd"] as? NSNumber)?.doubleValue,
-            stripeDiscountPercent: catalog["stripe_discount_percent"] as? Int ?? 10
+            paygAppleUSD: (payg["apple_usd"] as? NSNumber)?.doubleValue
         )
-    }
-
-    /// `POST /api/property/credits/checkout` — Stripe web checkout URL (10% off).
-    func creditCheckoutURL(itemID: String) async throws -> URL {
-        let result = try await authorizedJSON(
-            path: "api/property/credits/checkout", method: "POST", body: ["item_id": itemID]
-        )
-        guard let dict = result as? [String: Any],
-              let urlString = dict["url"] as? String, let url = URL(string: urlString) else {
-            throw BackendError.malformedResponse
-        }
-        return url
     }
 
     /// `POST /api/property/credits/iap` — redeem an Apple StoreKit purchase.
