@@ -63,17 +63,6 @@ struct ArchieBackendService {
         ], email: email, password: password)
     }
 
-    /// Creates a new Archie account (same accounts as app.archie.now; new
-    /// accounts start on the free tier) and signs in.
-    @discardableResult
-    func signUp(name: String, email: String, password: String) async throws -> String {
-        try await authenticate(path: "api/auth/signup", body: [
-            "name": name,
-            "email": email,
-            "password": password
-        ], email: email, password: password)
-    }
-
     private func authenticate(
         path: String,
         body: [String: String],

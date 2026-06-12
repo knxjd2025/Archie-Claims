@@ -55,7 +55,7 @@ struct SettingsView: View {
         } header: {
             Text("Account")
         } footer: {
-            Text("Sign in with your Archie account to turn on the AI assistant, owner lookups, and CRM sync. New accounts are free. Your password is stored only in this device's Keychain to keep you signed in.")
+            Text("Sign in with your existing Archie account (app.archie.now) to turn on the AI assistant, owner lookups, and CRM sync. Your password is stored only in this device's Keychain to keep you signed in.")
         }
     }
 
