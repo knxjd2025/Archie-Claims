@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 /// discuss them (and file them to the client's claim in the CRM).
 struct AssistantView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var revenueCat: RevenueCatManager
 
     @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
@@ -113,7 +114,8 @@ struct AssistantView: View {
             .navigationTitle("Archie AI")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showAuthSheet) {
-                ArchieAccountSheet { _ in
+                ArchieAccountSheet { email in
+                    revenueCat.logIn(appUserID: email)
                     errorText = nil
                 }
             }

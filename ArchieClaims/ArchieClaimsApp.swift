@@ -7,11 +7,13 @@ struct ArchieClaimsApp: App {
     @StateObject private var locationManager = LocationManager()
     @StateObject private var syncService: LeadSyncService
     @StateObject private var storeManager = StoreManager()
+    @StateObject private var revenueCat = RevenueCatManager()
 
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppSettings.archieBaseURLKey) private var archieBaseURL = ""
 
     init() {
+        RevenueCatManager.configureSDK()
         let store = LeadStore()
         _leadStore = StateObject(wrappedValue: store)
         _syncService = StateObject(wrappedValue: LeadSyncService(store: store))
@@ -25,6 +27,7 @@ struct ArchieClaimsApp: App {
                 .environmentObject(locationManager)
                 .environmentObject(syncService)
                 .environmentObject(storeManager)
+                .environmentObject(revenueCat)
                 .task {
                     syncService.updateBaseURL(archieBaseURL)
                     syncService.start()
@@ -32,6 +35,10 @@ struct ArchieClaimsApp: App {
                     // was killed mid-redeem, or a subscription renewed while closed).
                     storeManager.configure(baseURLOverride: archieBaseURL)
                     storeManager.startListening()
+                    revenueCat.start()
+                    if let email = ArchieBackendService.signedInEmail {
+                        revenueCat.logIn(appUserID: email)
+                    }
                 }
                 .onChange(of: archieBaseURL) {
                     syncService.updateBaseURL(archieBaseURL)
