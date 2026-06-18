@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var syncService: LeadSyncService
-    @EnvironmentObject private var revenueCat: RevenueCatManager
     @AppStorage(AppSettings.searchRadiusKey) private var radiusMiles = AppSettings.defaultRadiusMiles
     @AppStorage(AppSettings.lookbackDaysKey) private var lookbackDays = AppSettings.defaultLookbackDays
 
@@ -12,15 +11,11 @@ struct SettingsView: View {
     @State private var showDeleteConfirm = false
     @State private var deleting = false
     @State private var deleteError: String?
-    @State private var showPaywall = false
-    @State private var showCustomerCenter = false
-    @State private var restoring = false
 
     var body: some View {
         NavigationStack {
             Form {
                 aiSection
-                proSection
                 stormSection
                 aboutSection
             }
@@ -52,62 +47,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Pro subscription (RevenueCat)
-
-    private var proSection: some View {
-        Section {
-            if revenueCat.isPro {
-                HStack {
-                    Image(systemName: "star.circle.fill")
-                        .foregroundStyle(.yellow)
-                    Text("Archie Canvass Pro is active")
-                        .font(.subheadline)
-                }
-                Button("Manage Subscription") {
-                    showCustomerCenter = true
-                }
-            } else {
-                Button {
-                    showPaywall = true
-                } label: {
-                    HStack {
-                        Image(systemName: "star.circle")
-                        Text("Upgrade to Archie Canvass Pro")
-                    }
-                }
-                Button {
-                    restoring = true
-                    Task {
-                        await revenueCat.restorePurchases()
-                        restoring = false
-                    }
-                } label: {
-                    HStack {
-                        Text("Restore Purchases")
-                        if restoring {
-                            Spacer()
-                            ProgressView().controlSize(.small)
-                        }
-                    }
-                }
-                .disabled(restoring)
-            }
-            if let storeError = revenueCat.lastError {
-                Label(storeError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            Text("Archie Canvass Pro")
-        }
-        .sheet(isPresented: $showPaywall) {
-            ProPaywallView()
-        }
-        .sheet(isPresented: $showCustomerCenter) {
-            CustomerCenterSheet()
-        }
-    }
-
     // MARK: - AI
 
     private var aiSection: some View {
@@ -136,7 +75,6 @@ struct SettingsView: View {
             }
             Button("Sign Out", role: .destructive) {
                 ArchieBackendService.signOut()
-                revenueCat.logOut()
                 self.signedInEmail = nil
             }
             Button(role: .destructive) {
@@ -154,7 +92,6 @@ struct SettingsView: View {
         } else {
             ArchieAccountForm { email in
                 signedInEmail = email
-                revenueCat.logIn(appUserID: email)
                 // Drain any leads queued while signed out.
                 syncService.requestSync()
             }
