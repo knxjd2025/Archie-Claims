@@ -59,6 +59,20 @@ struct LeadDetailView: View {
             }
 
             Section {
+                TagChipsEditor(tags: $lead.tags)
+            } header: {
+                Text("Tags")
+            }
+
+            Section {
+                FollowUpEditor(date: $lead.followUpAt)
+            } header: {
+                Text("Follow-up")
+            } footer: {
+                Text("Reminds you on this device. Not synced to the CRM.")
+            }
+
+            Section {
                 if !sanitizedPhone.isEmpty, let telURL = URL(string: "tel://\(sanitizedPhone)") {
                     Link(destination: telURL) {
                         Label("Call \(lead.homeownerName.isEmpty ? "Homeowner" : lead.homeownerName)", systemImage: "phone.fill")

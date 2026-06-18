@@ -98,8 +98,47 @@ struct Lead: Identifiable, Codable, Hashable {
     /// fall back to `updatedAt`.
     var lastKnockAt: Date?
 
+    /// Rep-applied quick tags for triage ("Roof damage", "Dog", "Callback"…).
+    /// A device-side canvassing aid; not sent to the CRM. Defaulted for migration.
+    var tags: [String] = []
+
+    /// When the rep plans to come back. Drives the Follow-ups list and a local
+    /// reminder notification. Device-side; not sent to the CRM. Defaulted for migration.
+    var followUpAt: Date? = nil
+
     /// The timestamp that counts as a knock for tallies.
     var knockedAt: Date { lastKnockAt ?? updatedAt }
+
+    /// A follow-up exists and its time has arrived (or passed).
+    var isFollowUpDue: Bool {
+        guard let followUpAt else { return false }
+        return followUpAt <= Date()
+    }
+
+    // MARK: - Tag catalog
+
+    /// Curated quick-pick tags shown as chips. Reps can also add custom ones.
+    static let suggestedTags: [String] = [
+        "Roof damage", "Active leak", "Old roof", "Insurance filed",
+        "Competitor", "Renter", "Dog", "Callback", "Do not knock"
+    ]
+
+    /// SF Symbol + color for a tag chip. Known tags get distinct styling;
+    /// custom tags fall back to a neutral label.
+    static func tagStyle(_ tag: String) -> (symbol: String, color: Color) {
+        switch tag {
+        case "Roof damage": return ("exclamationmark.triangle.fill", .red)
+        case "Active leak": return ("drop.fill", .blue)
+        case "Old roof": return ("clock.arrow.circlepath", .orange)
+        case "Insurance filed": return ("doc.text.fill", .teal)
+        case "Competitor": return ("flag.fill", .purple)
+        case "Renter": return ("person.fill", .gray)
+        case "Dog": return ("pawprint.fill", .brown)
+        case "Callback": return ("phone.arrow.up.right.fill", .indigo)
+        case "Do not knock": return ("hand.raised.fill", .red)
+        default: return ("tag.fill", .gray)
+        }
+    }
 
     // MARK: - CRM sync (managed by LeadSyncService; all optional for migration)
 

@@ -37,6 +37,10 @@ struct PropertySheetView: View {
     @State private var contactNotes = ""
     @State private var prefilled = false
 
+    // Canvass tools (pre-filled from an existing lead).
+    @State private var tags: [String] = []
+    @State private var followUp: Date?
+
     // Free property characteristics (auto-filled from OpenStreetMap).
     @State private var property: PropertyDataService.PropertyInfo?
     @State private var loadingProperty = true
@@ -61,6 +65,8 @@ struct PropertySheetView: View {
                 addressSection
                 logDoorSection
                 homeownerSection
+                tagsSection
+                followUpSection
                 stormSection
                 ownerLookupSection
                 actionSection
@@ -74,6 +80,14 @@ struct PropertySheetView: View {
                 }
             }
             .onAppear(perform: prefillFromExistingLead)
+            .onChange(of: tags) { _, newValue in
+                guard prefilled else { return }
+                leadStore.setTags(newValue, for: ensureLead())
+            }
+            .onChange(of: followUp) { _, newValue in
+                guard prefilled else { return }
+                leadStore.setFollowUp(newValue, for: ensureLead())
+            }
             .task {
                 async let geo: Void = loadGeocode()
                 async let storms: Void = loadStorms()
@@ -160,6 +174,36 @@ struct PropertySheetView: View {
         }
     }
 
+    private var tagsSection: some View {
+        Section {
+            TagChipsEditor(tags: $tags)
+        } header: {
+            Text("Tags")
+        } footer: {
+            Text("Tag this house for quick triage and filtering. Stays on this device.")
+        }
+    }
+
+    private var followUpSection: some View {
+        Section {
+            FollowUpEditor(date: $followUp)
+        } header: {
+            Text("Follow-up")
+        } footer: {
+            Text("Set a reminder to come back. You'll get a notification at that time. Stays on this device.")
+        }
+    }
+
+    /// Returns the saved lead for this house, creating one (carrying current
+    /// contact + property data) if the rep tagged or scheduled before saving.
+    @discardableResult
+    private func ensureLead() -> Lead {
+        if let lead = existingLead { return lead }
+        let lead = newLead(status: .newLead, knockedNow: false)
+        leadStore.add(lead)
+        return lead
+    }
+
     private func openInMaps() {
         let query = (geocode?.address ?? "\(coordinate.latitude),\(coordinate.longitude)")
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
@@ -179,6 +223,9 @@ struct PropertySheetView: View {
                         .foregroundStyle(.secondary)
                 }
             case .loaded:
+                if !nearbyReports.isEmpty {
+                    StormEvidenceHeadline(reports: nearbyReports)
+                }
                 if !alerts.isEmpty {
                     ForEach(alerts) { alert in
                         VStack(alignment: .leading, spacing: 2) {
@@ -513,6 +560,8 @@ struct PropertySheetView: View {
             phone = lead.phone
             email = lead.email
             contactNotes = lead.notes
+            tags = lead.tags
+            followUp = lead.followUpAt
         }
     }
 

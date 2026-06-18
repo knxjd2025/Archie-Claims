@@ -5,17 +5,24 @@ struct LeadsView: View {
     @EnvironmentObject private var leadStore: LeadStore
     @EnvironmentObject private var syncService: LeadSyncService
     @State private var filter: Lead.Status?
+    @State private var followUpsOnly = false
     @State private var searchText = ""
 
+    private var dueCount: Int { leadStore.leads.filter(\.isFollowUpDue).count }
+
     private var filtered: [Lead] {
-        leadStore.leads
-            .filter { lead in
-                (filter == nil || lead.status == filter) &&
-                (searchText.isEmpty
-                 || lead.address.localizedCaseInsensitiveContains(searchText)
-                 || lead.homeownerName.localizedCaseInsensitiveContains(searchText))
-            }
-            .sorted { $0.updatedAt > $1.updatedAt }
+        let base = leadStore.leads.filter { lead in
+            (filter == nil || lead.status == filter) &&
+            (!followUpsOnly || lead.followUpAt != nil) &&
+            (searchText.isEmpty
+             || lead.address.localizedCaseInsensitiveContains(searchText)
+             || lead.homeownerName.localizedCaseInsensitiveContains(searchText)
+             || lead.tags.contains { $0.localizedCaseInsensitiveContains(searchText) })
+        }
+        if followUpsOnly {
+            return base.sorted { ($0.followUpAt ?? .distantFuture) < ($1.followUpAt ?? .distantFuture) }
+        }
+        return base.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     var body: some View {
@@ -38,7 +45,18 @@ struct LeadsView: View {
                             leadStore.delete(at: offsets, in: filtered)
                         }
                     }
-                    .searchable(text: $searchText, prompt: "Address or name")
+                    .overlay {
+                        if filtered.isEmpty {
+                            ContentUnavailableView(
+                                followUpsOnly ? "No follow-ups" : "No matches",
+                                systemImage: followUpsOnly ? "bell.slash" : "magnifyingglass",
+                                description: Text(followUpsOnly
+                                    ? "Set a follow-up on a lead and it'll show up here."
+                                    : "Try a different search or filter.")
+                            )
+                        }
+                    }
+                    .searchable(text: $searchText, prompt: "Address, name, or tag")
                 }
             }
             .navigationTitle("Leads")
@@ -53,6 +71,24 @@ struct LeadsView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        followUpsOnly.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: followUpsOnly ? "bell.fill" : "bell")
+                            if dueCount > 0 {
+                                Text("\(dueCount)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(.red, in: Capsule())
+                            }
+                        }
+                    }
+                    .tint(followUpsOnly ? .accentColor : (dueCount > 0 ? .red : .accentColor))
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("All") { filter = nil }
@@ -104,13 +140,33 @@ struct LeadRow: View {
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
                 .background(lead.status.color, in: Circle())
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(lead.shortAddress)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 Text(lead.homeownerName.isEmpty ? lead.status.rawValue : "\(lead.homeownerName) · \(lead.status.rawValue)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !lead.tags.isEmpty || lead.followUpAt != nil {
+                    HStack(spacing: 4) {
+                        if let followUp = lead.followUpAt {
+                            Label {
+                                Text(followUp, format: .dateTime.month(.abbreviated).day())
+                            } icon: {
+                                Image(systemName: "bell.fill")
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(lead.isFollowUpDue ? .red : .secondary)
+                        }
+                        ForEach(lead.tags.prefix(3), id: \.self) { TagChip(tag: $0) }
+                        if lead.tags.count > 3 {
+                            Text("+\(lead.tags.count - 3)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .lineLimit(1)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {

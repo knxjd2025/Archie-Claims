@@ -27,6 +27,7 @@ final class LeadStore: ObservableObject {
     func add(_ lead: Lead) {
         leads.insert(lead, at: 0)
         save()
+        FollowUpNotifier.reschedule(for: lead)
         onLeadsChanged?()
     }
 
@@ -47,11 +48,33 @@ final class LeadStore: ObservableObject {
         updated.stories = lead.stories
         updated.roofShape = lead.roofShape
         updated.lastKnockAt = lead.lastKnockAt
+        updated.tags = lead.tags
+        updated.followUpAt = lead.followUpAt
         updated.updatedAt = Date()
         markDirty(&updated)
         leads[index] = updated
         save()
+        FollowUpNotifier.reschedule(for: updated)
         onLeadsChanged?()
+    }
+
+    /// Sets (or clears) a lead's follow-up date and reschedules its reminder.
+    /// Tags and follow-ups are device-side aids, so this saves locally without
+    /// re-queuing a CRM sync.
+    func setFollowUp(_ date: Date?, for lead: Lead) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].followUpAt = date
+        leads[index].updatedAt = Date()
+        save()
+        FollowUpNotifier.reschedule(for: leads[index])
+    }
+
+    /// Replaces a lead's tags (device-side; no CRM sync).
+    func setTags(_ tags: [String], for lead: Lead) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].tags = tags
+        leads[index].updatedAt = Date()
+        save()
     }
 
     /// Records a knock outcome: updates the status and stamps `lastKnockAt` so
@@ -70,11 +93,13 @@ final class LeadStore: ObservableObject {
 
     func delete(_ lead: Lead) {
         leads.removeAll { $0.id == lead.id }
+        FollowUpNotifier.cancel(lead.id)
         save()
     }
 
     func delete(at offsets: IndexSet, in filtered: [Lead]) {
         let ids = offsets.map { filtered[$0].id }
+        ids.forEach(FollowUpNotifier.cancel)
         leads.removeAll { ids.contains($0.id) }
         save()
     }
